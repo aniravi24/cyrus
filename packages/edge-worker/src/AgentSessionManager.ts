@@ -1732,52 +1732,174 @@ export class AgentSessionManager extends EventEmitter {
 			return undefined;
 		}
 
-		const summaryLines: string[] = [
-			"Previous context (session was interrupted):",
-		];
+		const sections: string[] = [];
 
-		// Keep track of total characters to stay under ~2000 chars (~500 tokens)
-		const maxSummaryChars = 2000;
-		let currentChars = summaryLines[0]!.length;
+		// Collect user messages
+		const userMessages: string[] = [];
+		// Collect file modifications (Edit/Write tools)
+		const fileModifications: string[] = [];
+		// Collect commands run
+		const commandsRun: string[] = [];
+		// Collect other tool usage
+		const otherTools: string[] = [];
+		// Collect errors
+		const errors: string[] = [];
+		// Track last assistant response (non-tool)
+		let lastAssistantResponse: string | undefined;
 
 		for (const entry of entries) {
-			let line: string | undefined;
-
+			// User messages (not tool results)
 			if (entry.type === "user" && !entry.metadata?.toolUseId) {
-				// Include user messages (not tool results), truncated if long
 				const content =
+					entry.content.length > 500
+						? `${entry.content.slice(0, 500)}...`
+						: entry.content;
+				userMessages.push(content);
+			}
+
+			// Assistant text responses (no tool, just thinking/responding)
+			if (
+				entry.type === "assistant" &&
+				!entry.metadata?.toolName &&
+				entry.content.trim()
+			) {
+				lastAssistantResponse = entry.content;
+			}
+
+			// Tool usage with inputs
+			if (entry.type === "assistant" && entry.metadata?.toolName) {
+				const toolName = entry.metadata.toolName;
+				const toolInput = entry.metadata.toolInput;
+
+				// Skip noisy tools
+				if (toolName === "TodoWrite" || toolName === "TodoRead") {
+					continue;
+				}
+
+				// File editing tools - capture file paths
+				if (
+					(toolName === "Edit" || toolName === "Write") &&
+					toolInput?.file_path
+				) {
+					const filePath = toolInput.file_path;
+					if (!fileModifications.includes(filePath)) {
+						fileModifications.push(filePath);
+					}
+				}
+				// Bash commands - capture the command
+				else if (toolName === "Bash" && toolInput?.command) {
+					const cmd =
+						toolInput.command.length > 100
+							? `${toolInput.command.slice(0, 100)}...`
+							: toolInput.command;
+					commandsRun.push(cmd);
+				}
+				// Read tool - note which files were read
+				else if (toolName === "Read" && toolInput?.file_path) {
+					const readEntry = `Read: ${toolInput.file_path}`;
+					if (!otherTools.includes(readEntry)) {
+						otherTools.push(readEntry);
+					}
+				}
+				// Grep/Glob - note the search
+				else if (toolName === "Grep" && toolInput?.pattern) {
+					otherTools.push(`Grep: "${toolInput.pattern}"`);
+				} else if (toolName === "Glob" && toolInput?.pattern) {
+					otherTools.push(`Glob: "${toolInput.pattern}"`);
+				}
+				// Other tools - just note the name
+				else if (
+					!["Edit", "Write", "Bash", "Read", "Grep", "Glob"].includes(toolName)
+				) {
+					if (!otherTools.includes(toolName)) {
+						otherTools.push(toolName);
+					}
+				}
+			}
+
+			// Capture errors
+			if (entry.metadata?.toolResultError || entry.metadata?.isError) {
+				const errorContent =
 					entry.content.length > 200
 						? `${entry.content.slice(0, 200)}...`
 						: entry.content;
-				line = `- User: "${content}"`;
-			} else if (
-				entry.type === "assistant" &&
-				entry.metadata?.toolName &&
-				entry.metadata.toolName !== "TodoWrite" // Skip noisy TodoWrite
-			) {
-				// Summarize tool usage
-				line = `- You used: ${entry.metadata.toolName}`;
-			}
-
-			if (line) {
-				// Check if adding this line would exceed limit
-				if (currentChars + line.length + 1 > maxSummaryChars) {
-					summaryLines.push("- ... (earlier context truncated)");
-					break;
-				}
-				summaryLines.push(line);
-				currentChars += line.length + 1;
+				errors.push(errorContent);
 			}
 		}
 
-		// Only return summary if we have meaningful content beyond the header
-		if (summaryLines.length <= 1) {
+		// Build the summary with clear sections
+		sections.push("# Session Recovery Context\n");
+		sections.push(
+			"Your previous session was interrupted. Here's what was happening:\n",
+		);
+
+		// User requests
+		if (userMessages.length > 0) {
+			sections.push("## User Requests");
+			// Show most recent user messages (last 3)
+			const recentMessages = userMessages.slice(-3);
+			for (const msg of recentMessages) {
+				sections.push(`> ${msg.replace(/\n/g, "\n> ")}`);
+			}
+			sections.push("");
+		}
+
+		// Files modified
+		if (fileModifications.length > 0) {
+			sections.push("## Files You Modified");
+			for (const file of fileModifications.slice(-15)) {
+				sections.push(`- ${file}`);
+			}
+			sections.push("");
+		}
+
+		// Commands run
+		if (commandsRun.length > 0) {
+			sections.push("## Commands You Ran");
+			// Show last 5 commands
+			for (const cmd of commandsRun.slice(-5)) {
+				sections.push(`- \`${cmd}\``);
+			}
+			sections.push("");
+		}
+
+		// Other tools used
+		if (otherTools.length > 0) {
+			sections.push("## Other Actions");
+			for (const tool of otherTools.slice(-10)) {
+				sections.push(`- ${tool}`);
+			}
+			sections.push("");
+		}
+
+		// Errors encountered
+		if (errors.length > 0) {
+			sections.push("## Errors Encountered");
+			for (const error of errors.slice(-3)) {
+				sections.push(`- ${error}`);
+			}
+			sections.push("");
+		}
+
+		// Last assistant response (what Claude was thinking/saying)
+		if (lastAssistantResponse) {
+			const truncated =
+				lastAssistantResponse.length > 500
+					? `${lastAssistantResponse.slice(0, 500)}...`
+					: lastAssistantResponse;
+			sections.push("## Your Last Response");
+			sections.push(truncated);
+			sections.push("");
+		}
+
+		// Only return summary if we have meaningful content
+		if (sections.length <= 2) {
 			return undefined;
 		}
 
-		const summary = summaryLines.join("\n");
+		const summary = sections.join("\n");
 		console.log(
-			`[AgentSessionManager] Built conversation summary for ${linearAgentActivitySessionId}: ${summaryLines.length - 1} entries, ${summary.length} chars`,
+			`[AgentSessionManager] Built conversation summary for ${linearAgentActivitySessionId}: ${summary.length} chars`,
 		);
 		return summary;
 	}
