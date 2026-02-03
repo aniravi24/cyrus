@@ -778,6 +778,14 @@ export class AgentSessionManager extends EventEmitter {
 		session.status = status;
 		session.updatedAt = Date.now();
 
+		// Clear wasRunning flag when session reaches terminal state (for crash recovery tracking)
+		if (
+			status === AgentSessionStatus.Complete ||
+			status === AgentSessionStatus.Error
+		) {
+			session.wasRunning = false;
+		}
+
 		if (additionalMetadata) {
 			session.metadata = { ...session.metadata, ...additionalMetadata };
 		}
@@ -1289,6 +1297,7 @@ export class AgentSessionManager extends EventEmitter {
 		}
 
 		session.agentRunner = agentRunner;
+		session.wasRunning = true; // Track for crash recovery
 		session.updatedAt = Date.now();
 		console.log(
 			`[AgentSessionManager] Added agent runner to session ${linearAgentActivitySessionId}`,
@@ -1339,6 +1348,19 @@ export class AgentSessionManager extends EventEmitter {
 	 */
 	getAllSessions(): CyrusAgentSession[] {
 		return Array.from(this.sessions.values());
+	}
+
+	/**
+	 * Get sessions that were interrupted (wasRunning === true but no active runner)
+	 * Used for crash recovery on startup
+	 */
+	getInterruptedSessions(): CyrusAgentSession[] {
+		return Array.from(this.sessions.values()).filter(
+			(session) =>
+				session.wasRunning === true &&
+				!session.agentRunner?.isRunning() &&
+				session.status === AgentSessionStatus.Active,
+		);
 	}
 
 	/**
@@ -1725,7 +1747,7 @@ export class AgentSessionManager extends EventEmitter {
 				// Include user messages (not tool results), truncated if long
 				const content =
 					entry.content.length > 200
-						? entry.content.slice(0, 200) + "..."
+						? `${entry.content.slice(0, 200)}...`
 						: entry.content;
 				line = `- User: "${content}"`;
 			} else if (

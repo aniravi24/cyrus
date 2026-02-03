@@ -394,6 +394,9 @@ export class EdgeWorker extends EventEmitter {
 
 		// Start shared application server (this also starts Cloudflare tunnel if CLOUDFLARE_TOKEN is set)
 		await this.sharedApplicationServer.start();
+
+		// Resume any sessions that were interrupted by a crash/restart
+		await this.resumeInterruptedSessions();
 	}
 
 	/**
@@ -5821,6 +5824,87 @@ ${input.userComment}
 			);
 		} catch (error) {
 			console.error(`Failed to save persisted EdgeWorker state:`, error);
+		}
+	}
+
+	/**
+	 * Resume sessions that were interrupted by a crash/restart
+	 * Looks for sessions with wasRunning === true and no active runner
+	 */
+	private async resumeInterruptedSessions(): Promise<void> {
+		console.log(`[EdgeWorker] Checking for interrupted sessions to resume...`);
+		let resumedCount = 0;
+
+		for (const [
+			repositoryId,
+			agentSessionManager,
+		] of this.agentSessionManagers.entries()) {
+			const interruptedSessions = agentSessionManager.getInterruptedSessions();
+
+			if (interruptedSessions.length === 0) {
+				continue;
+			}
+
+			const repository = this.repositories.get(repositoryId);
+			if (!repository) {
+				console.warn(
+					`[EdgeWorker] Repository ${repositoryId} not found for interrupted sessions`,
+				);
+				continue;
+			}
+
+			console.log(
+				`[EdgeWorker] Found ${interruptedSessions.length} interrupted session(s) for repository ${repository.name}`,
+			);
+
+			for (const session of interruptedSessions) {
+				try {
+					// Build a recovery prompt with context from stored entries
+					const summary = agentSessionManager.buildConversationSummary(
+						session.linearAgentActivitySessionId,
+					);
+
+					const recoveryPrompt = summary
+						? `${summary}\n\n---\n\nContinue where you left off.`
+						: "Continue the task you were working on.";
+
+					console.log(
+						`[EdgeWorker] Resuming interrupted session ${session.linearAgentActivitySessionId} for issue ${session.issue?.identifier || session.issueId}`,
+					);
+
+					// Post a thought activity to inform the user
+					await agentSessionManager.createThoughtActivity(
+						session.linearAgentActivitySessionId,
+						"Resuming after interruption. Let me continue where I left off.",
+					);
+
+					// Resume the session with the recovery prompt
+					await this.resumeAgentSession(
+						session,
+						repository,
+						session.linearAgentActivitySessionId,
+						agentSessionManager,
+						recoveryPrompt,
+						"", // No attachment manifest for recovery
+						true, // Force new session (the old claudeSessionId is stale)
+					);
+
+					resumedCount++;
+				} catch (error) {
+					console.error(
+						`[EdgeWorker] Failed to resume interrupted session ${session.linearAgentActivitySessionId}:`,
+						error,
+					);
+					// Mark session as no longer running to avoid repeated resume attempts
+					session.wasRunning = false;
+				}
+			}
+		}
+
+		if (resumedCount > 0) {
+			console.log(`✅ Resumed ${resumedCount} interrupted session(s)`);
+		} else {
+			console.log(`[EdgeWorker] No interrupted sessions to resume`);
 		}
 	}
 
