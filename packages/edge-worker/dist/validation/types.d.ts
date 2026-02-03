@@ -1,0 +1,82 @@
+/**
+ * Types for the validation loop system
+ */
+import { z } from "zod";
+/**
+ * Zod schema for ValidationResult - the single source of truth
+ * Used with Claude SDK structured outputs
+ */
+export declare const ValidationResultSchema: z.ZodObject<{
+    pass: z.ZodBoolean;
+    reason: z.ZodString;
+}, z.core.$strip>;
+/**
+ * TypeScript type inferred from the Zod schema
+ */
+export type ValidationResult = z.infer<typeof ValidationResultSchema>;
+/**
+ * JSON Schema for ValidationResult - converted from Zod schema using Zod v4's native toJSONSchema()
+ * Used with Claude SDK structured outputs
+ */
+export declare const VALIDATION_RESULT_SCHEMA: {
+    type: "object";
+    properties: {
+        pass: {
+            type: "boolean";
+            description: string;
+        };
+        reason: {
+            type: "string";
+            description: string;
+        };
+    };
+    required: ["pass", "reason"];
+    additionalProperties: false;
+};
+/**
+ * Configuration for the validation loop
+ */
+export interface ValidationLoopConfig {
+    /** Maximum number of validation attempts (default: 4) */
+    maxIterations: number;
+    /** Whether to continue to next subroutine even if validation fails after all retries */
+    continueOnMaxRetries: boolean;
+}
+/**
+ * Default validation loop configuration
+ */
+export declare const DEFAULT_VALIDATION_LOOP_CONFIG: ValidationLoopConfig;
+/**
+ * State tracking for a validation loop execution
+ */
+export interface ValidationLoopState {
+    /** Current iteration (1-based) */
+    iteration: number;
+    /** Results from each validation attempt */
+    attempts: Array<{
+        iteration: number;
+        result: ValidationResult;
+        timestamp: number;
+    }>;
+    /** Whether the loop has completed (either passed or exhausted retries) */
+    completed: boolean;
+    /** Final outcome */
+    outcome: "passed" | "failed_max_retries" | "in_progress";
+}
+/**
+ * Context passed to the validation-fixer subroutine
+ */
+export interface ValidationFixerContext {
+    /** The failure reason from the previous validation attempt */
+    failureReason: string;
+    /** Current iteration number */
+    iteration: number;
+    /** Maximum iterations allowed */
+    maxIterations: number;
+    /** Previous attempt results for context */
+    previousAttempts: Array<{
+        iteration: number;
+        reason: string;
+    }>;
+}
+//# sourceMappingURL=types.d.ts.map
