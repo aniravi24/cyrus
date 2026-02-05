@@ -49,6 +49,8 @@ export interface CyrusAgentSession {
 		totalCostUsd?: number;
 		usage?: any;
 		commentId?: string;
+		/** Tracks crash recovery attempts to prevent infinite retry loops */
+		crashRetryCount?: number;
 		procedure?: {
 			procedureName: string;
 			currentSubroutineIndex: number;

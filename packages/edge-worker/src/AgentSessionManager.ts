@@ -280,6 +280,11 @@ export class AgentSessionManager extends EventEmitter {
 			usage: resultMessage.usage,
 		});
 
+		// Reset crash retry count on successful completion
+		if (resultMessage.subtype === "success" && session.metadata) {
+			delete session.metadata.crashRetryCount;
+		}
+
 		// Handle result using procedure routing system
 		if ("result" in resultMessage && resultMessage.result) {
 			await this.handleProcedureCompletion(
@@ -1352,14 +1357,42 @@ export class AgentSessionManager extends EventEmitter {
 
 	/**
 	 * Get sessions that were interrupted (wasRunning === true but no active runner)
-	 * Used for crash recovery on startup
+	 * Used for crash recovery on startup.
+	 *
+	 * Note: We intentionally do NOT filter by status === Active here.
+	 * Between subroutines, status is set to "complete" by completeSession()
+	 * before the next subroutine starts and sets wasRunning back to true.
+	 * The wasRunning flag is the definitive signal for interrupted sessions.
 	 */
 	getInterruptedSessions(): CyrusAgentSession[] {
 		return Array.from(this.sessions.values()).filter(
 			(session) =>
-				session.wasRunning === true &&
-				!session.agentRunner?.isRunning() &&
-				session.status === AgentSessionStatus.Active,
+				session.wasRunning === true && !session.agentRunner?.isRunning(),
+		);
+	}
+
+	/**
+	 * Reset session status to Active for crash recovery.
+	 * Used when resuming interrupted sessions that may have
+	 * status=Complete from a completed subroutine.
+	 */
+	resetSessionStatusForRecovery(linearAgentActivitySessionId: string): void {
+		const session = this.sessions.get(linearAgentActivitySessionId);
+		if (!session) return;
+		session.status = AgentSessionStatus.Active;
+		session.updatedAt = Date.now();
+	}
+
+	/**
+	 * Mark a session as error state and clear wasRunning flag.
+	 * Used by EdgeWorker for crash recovery when max retries are exhausted.
+	 */
+	async markSessionAsError(
+		linearAgentActivitySessionId: string,
+	): Promise<void> {
+		await this.updateSessionStatus(
+			linearAgentActivitySessionId,
+			AgentSessionStatus.Error,
 		);
 	}
 
