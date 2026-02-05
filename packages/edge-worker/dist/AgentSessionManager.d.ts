@@ -171,9 +171,25 @@ export declare class AgentSessionManager extends EventEmitter {
     getAllSessions(): CyrusAgentSession[];
     /**
      * Get sessions that were interrupted (wasRunning === true but no active runner)
-     * Used for crash recovery on startup
+     * Used for crash recovery on startup.
+     *
+     * Note: We intentionally do NOT filter by status === Active here.
+     * Between subroutines, status is set to "complete" by completeSession()
+     * before the next subroutine starts and sets wasRunning back to true.
+     * The wasRunning flag is the definitive signal for interrupted sessions.
      */
     getInterruptedSessions(): CyrusAgentSession[];
+    /**
+     * Reset session status to Active for crash recovery.
+     * Used when resuming interrupted sessions that may have
+     * status=Complete from a completed subroutine.
+     */
+    resetSessionStatusForRecovery(linearAgentActivitySessionId: string): void;
+    /**
+     * Mark a session as error state and clear wasRunning flag.
+     * Used by EdgeWorker for crash recovery when max retries are exhausted.
+     */
+    markSessionAsError(linearAgentActivitySessionId: string): Promise<void>;
     /**
      * Get agent runner for a specific session
      */

@@ -249,7 +249,19 @@ export declare class EdgeWorker extends EventEmitter {
      * Handle Claude session error
      * Silently ignores AbortError (user-initiated stop), logs other errors
      */
+    private static readonly MAX_CRASH_RETRIES;
+    private static readonly CRASH_RETRY_DELAY_MS;
     private handleClaudeError;
+    /**
+     * Handle runner crash by attempting automatic recovery.
+     * Follows the same pattern as "resume-failed" stale session recovery.
+     *
+     * Guards:
+     * - Skips if session is already in terminal state (Error/Complete with wasRunning=false)
+     * - Skips if max retries exceeded
+     * - Skips if AbortError or SIGTERM (graceful shutdown)
+     */
+    private handleRunnerCrashRecovery;
     /**
      * Fetch issue labels for a given issue
      */
