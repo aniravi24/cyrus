@@ -95,6 +95,7 @@ export interface CyrusAgentSession {
 	codexSessionId?: string; // Codex-specific session ID (assigned once it initializes)
 	cursorSessionId?: string; // Cursor-specific session ID (assigned once it initializes)
 	agentRunner?: IAgentRunner;
+	wasRunning?: boolean; // Track if session had active runner when last persisted (for crash recovery)
 	metadata?: {
 		model?: string;
 		tools?: string[];
@@ -105,6 +106,8 @@ export interface CyrusAgentSession {
 		commentId?: string;
 		/** Chat sessions: thread position up to which this session has context */
 		lastContextTs?: string;
+		/** Tracks crash recovery attempts to prevent infinite retry loops */
+		crashRetryCount?: number;
 	};
 }
 
