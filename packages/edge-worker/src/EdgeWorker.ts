@@ -7497,6 +7497,67 @@ ${input.userComment}
 		// Create the appropriate runner based on session state
 		const runner = this.createRunnerForType(runnerType, runnerConfig);
 
+		// Handle resume-failed event (stale session recovery)
+		// This occurs when the persisted session ID no longer exists (e.g., after pod restart)
+		if (resumeSessionId && runnerType === "claude") {
+			(runner as ClaudeRunner).on(
+				"resume-failed",
+				async (staleSessionId: string) => {
+					console.log(
+						`[resumeAgentSession] Resume failed for session ${sessionId}, stale ID: ${staleSessionId}`,
+					);
+
+					// Clear the stale session ID
+					agentSessionManager.clearClaudeSessionId(sessionId);
+
+					// Build conversation summary from stored entries
+					const contextSummary =
+						agentSessionManager.buildConversationSummary(sessionId);
+
+					// Prepare recovery prompt with context
+					const recoveryPrompt = contextSummary
+						? `${contextSummary}\n\n---\n\nContinuing with: ${promptBody}`
+						: promptBody;
+
+					// Post thought to inform user about recovery
+					await agentSessionManager.createThoughtActivity(
+						sessionId,
+						"Session interrupted - reconstructing context and continuing...",
+					);
+
+					// Retry with a fresh session (recursively call resumeAgentSession with isNewSession=true)
+					try {
+						await this.resumeAgentSession(
+							session,
+							repository,
+							sessionId,
+							agentSessionManager,
+							recoveryPrompt,
+							attachmentManifest,
+							true, // Force new session (no resumeSessionId)
+							additionalAllowedDirectories,
+							resolvedWorkspaceId,
+							maxTurns,
+							commentAuthor,
+							commentTimestamp,
+						);
+						console.log(
+							`[resumeAgentSession] Successfully recovered session ${sessionId} with fresh context`,
+						);
+					} catch (retryError) {
+						console.error(
+							`[resumeAgentSession] Failed to recover session ${sessionId}:`,
+							retryError,
+						);
+						await agentSessionManager.createErrorActivity(
+							sessionId,
+							"Failed to recover session after interruption. Please try again.",
+						);
+					}
+				},
+			);
+		}
+
 		// Store runner
 		agentSessionManager.addAgentRunner(sessionId, runner);
 
