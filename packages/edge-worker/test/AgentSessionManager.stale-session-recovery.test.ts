@@ -23,7 +23,7 @@ describe("AgentSessionManager - Stale Session Recovery", () => {
 		manager = new AgentSessionManager(mockIssueTracker);
 
 		// Create a test session
-		manager.createLinearAgentSession(
+		manager.createCyrusAgentSession(
 			sessionId,
 			issueId,
 			{
