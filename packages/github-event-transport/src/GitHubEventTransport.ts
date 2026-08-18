@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import type { TranslationContext } from "cyrus-core";
 import { createLogger, type ILogger, ipMatchesAllowlist } from "cyrus-core";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { forgeFlavor } from "./forge-flavor.js";
 import { GitHubMessageTranslator } from "./GitHubMessageTranslator.js";
 import type {
 	GitHubEventTransportConfig,
@@ -90,14 +91,17 @@ export class GitHubEventTransport extends EventEmitter {
 		// Check if signature mode env vars have been added at runtime
 		const isExternalHost =
 			process.env.CYRUS_HOST_EXTERNAL?.toLowerCase().trim() === "true";
-		const githubSecret = process.env.GITHUB_WEBHOOK_SECRET;
-		const hasGithubSecret = githubSecret != null && githubSecret !== "";
+		// Either forge's secret enables signature mode. They are separate vars so
+		// a deployment talking to both does not have to share one HMAC secret.
+		const forgeSecret =
+			process.env.FORGEJO_WEBHOOK_SECRET || process.env.GITHUB_WEBHOOK_SECRET;
+		const hasForgeSecret = forgeSecret != null && forgeSecret !== "";
 
-		if (isExternalHost && hasGithubSecret) {
+		if (isExternalHost && hasForgeSecret) {
 			this.logger.info(
-				"Runtime switch: GITHUB_WEBHOOK_SECRET detected, using GitHub signature verification",
+				"Runtime switch: webhook secret detected, using signature verification",
 			);
-			return { mode: "signature", secret: githubSecret };
+			return { mode: "signature", secret: forgeSecret };
 		}
 
 		// Fall back to proxy mode with original config secret
@@ -105,11 +109,16 @@ export class GitHubEventTransport extends EventEmitter {
 	}
 
 	/**
-	 * Register the /github-webhook endpoint with the Fastify server
+	 * Register the webhook endpoint with the Fastify server
 	 */
+	/** Mount point, defaulting to the historical `/github-webhook`. */
+	private get routePath(): string {
+		return this.config.routePath ?? "/github-webhook";
+	}
+
 	register(): void {
 		this.config.fastifyServer.post(
-			"/github-webhook",
+			this.routePath,
 			{
 				config: {
 					rawBody: true,
@@ -137,7 +146,7 @@ export class GitHubEventTransport extends EventEmitter {
 		);
 
 		this.logger.info(
-			`Registered POST /github-webhook endpoint (${this.config.verificationMode} mode)`,
+			`Registered POST ${this.routePath} endpoint (${this.config.verificationMode} mode)`,
 		);
 	}
 
@@ -162,9 +171,10 @@ export class GitHubEventTransport extends EventEmitter {
 			return;
 		}
 
-		const signature = request.headers["x-hub-signature-256"] as string;
+		const { signatureHeader } = forgeFlavor(this.config.forge);
+		const signature = request.headers[signatureHeader] as string;
 		if (!signature) {
-			reply.code(401).send({ error: "Missing x-hub-signature-256 header" });
+			reply.code(401).send({ error: `Missing ${signatureHeader} header` });
 			return;
 		}
 
@@ -227,15 +237,19 @@ export class GitHubEventTransport extends EventEmitter {
 		request: FastifyRequest,
 		reply: FastifyReply,
 	): void {
-		const eventType = request.headers["x-github-event"] as string;
+		const { eventHeader } = forgeFlavor(this.config.forge);
+		const eventType = request.headers[eventHeader] as string;
+		// Forgejo sends x-gitea-delivery; fall back so either forge yields an id.
 		const deliveryId =
-			(request.headers["x-github-delivery"] as string) || "unknown";
+			(request.headers["x-github-delivery"] as string) ||
+			(request.headers["x-gitea-delivery"] as string) ||
+			"unknown";
 		const installationToken = request.headers["x-github-installation-token"] as
 			| string
 			| undefined;
 
 		if (!eventType) {
-			reply.code(400).send({ error: "Missing x-github-event header" });
+			reply.code(400).send({ error: `Missing ${eventHeader} header` });
 			return;
 		}
 
@@ -313,14 +327,20 @@ export class GitHubEventTransport extends EventEmitter {
 	}
 
 	/**
-	 * Verify GitHub webhook signature using HMAC-SHA256
+	 * Verify the webhook signature using HMAC-SHA256 over the RAW body.
+	 *
+	 * GitHub prefixes the hex digest with `sha256=`; Forgejo sends it bare. The
+	 * length check below is what makes timingSafeEqual safe to call, so the
+	 * prefix must be applied before comparing, not stripped after.
 	 */
 	private verifyGitHubSignature(
 		body: string,
 		signature: string,
 		secret: string,
 	): boolean {
-		const expectedSignature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+		const expectedSignature = forgeFlavor(this.config.forge).signatureValue(
+			createHmac("sha256", secret).update(body).digest("hex"),
+		);
 
 		if (signature.length !== expectedSignature.length) {
 			return false;

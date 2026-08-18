@@ -21,6 +21,12 @@
 		"gitlabUrl": {
 			"type": "string"
 		},
+		"forgejoUrl": {
+			"type": "string"
+		},
+		"forgejoApiUrl": {
+			"type": "string"
+		},
 		"linearWorkspaceId": {
 			"type": "string"
 		},
