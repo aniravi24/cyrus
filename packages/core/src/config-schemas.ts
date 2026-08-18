@@ -279,6 +279,18 @@ export const RepositoryConfigSchema = z.object({
 	baseBranch: z.string(),
 	githubUrl: z.string().optional(),
 	gitlabUrl: z.string().optional(),
+	/**
+	 * Self-hosted Forgejo/Gitea web URL for this repository, e.g.
+	 * `https://code.example.com/owner/repo`. Set alongside (not instead of)
+	 * `githubUrl` when a repo lives on both, so a mirror keeps routing.
+	 */
+	forgejoUrl: z.string().optional(),
+	/**
+	 * Forgejo API base, e.g. `https://code.example.com/api/v1`. Required when
+	 * `forgejoUrl` is set: Forgejo is self-hosted, so unlike GitHub there is no
+	 * default host to fall back to.
+	 */
+	forgejoApiUrl: z.string().optional(),
 
 	// Linear configuration (optional — repos may operate without Linear, e.g. via Slack or GitHub)
 	linearWorkspaceId: z.string().optional(),

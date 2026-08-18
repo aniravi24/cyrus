@@ -213,6 +213,7 @@ export class EdgeWorker extends EventEmitter {
 	private issueTrackers: Map<string, IIssueTrackerService> = new Map(); // one issue tracker per Linear workspace (keyed by linearWorkspaceId)
 	private linearEventTransport: LinearEventTransport | null = null; // Single event transport for webhook delivery
 	private gitHubEventTransport: GitHubEventTransport | null = null; // GitHub event transport for forwarded GitHub webhooks
+	private forgejoEventTransport: GitHubEventTransport | null = null; // Same transport, Forgejo flavor, on its own route
 	private gitHubAppTokenProvider: GitHubAppTokenProvider | null = null; // Self-hosted GitHub App token minting
 	private gitLabEventTransport: GitLabEventTransport | null = null; // GitLab event transport for forwarded GitLab webhooks
 	private slackEventTransport: SlackEventTransport | null = null;
@@ -897,6 +898,48 @@ export class EdgeWorker extends EventEmitter {
 	}
 
 	/**
+	 * Register a second, Forgejo-flavored transport on `/forgejo-webhook`.
+	 *
+	 * Forgejo is a Gitea fork with GitHub-shaped payloads, so this is the same
+	 * transport class with a different flavor rather than a parallel
+	 * implementation. It is a SEPARATE instance, not a replacement, because a
+	 * repo mid-migration receives from both forges at once and the two use
+	 * different secrets, header names, and signature formats.
+	 *
+	 * Only fires when FORGEJO_WEBHOOK_SECRET is set, so a GitHub-only
+	 * deployment is completely unaffected.
+	 */
+	private registerForgejoEventTransport(): void {
+		const secret = process.env.FORGEJO_WEBHOOK_SECRET;
+		if (!secret) return;
+
+		this.forgejoEventTransport = new GitHubEventTransport({
+			fastifyServer: this.sharedApplicationServer.getFastifyInstance(),
+			forge: "forgejo",
+			// Forgejo always sends directly to us; there is no CYHOST forwarding
+			// path for it, so signature verification is the only mode.
+			routePath: "/forgejo-webhook",
+			secret,
+			verificationMode: "signature",
+		});
+
+		this.forgejoEventTransport.on("event", (event: GitHubWebhookEvent) => {
+			if (event.eventType === "push") {
+				this.handleGitHubPushWebhook(event.payload as GitHubPushPayload).catch(
+					(error) => this.handleError(error as Error),
+				);
+			}
+		});
+		this.forgejoEventTransport.on("message", (message: InternalMessage) => {
+			this.handleMessage(message);
+		});
+		this.forgejoEventTransport.on("error", (error: Error) => {
+			this.handleError(error);
+		});
+		this.forgejoEventTransport.register();
+	}
+
+	/**
 	 * Register the GitHub event transport for receiving forwarded GitHub webhooks from CYHOST.
 	 * This creates a /github-webhook endpoint that handles @cyrusagent mentions on GitHub PRs.
 	 */
@@ -963,6 +1006,8 @@ export class EdgeWorker extends EventEmitter {
 
 		// Register the /github-webhook endpoint
 		this.gitHubEventTransport.register();
+
+		this.registerForgejoEventTransport();
 
 		// Initialize GitHub App token provider for self-hosted users
 		const appId = process.env.GITHUB_APP_ID;
@@ -1680,19 +1725,22 @@ Your base branch \`${branchName}\` has received ${commitCount} new commit(s). Co
 
 	/**
 	 * Find a repository configuration that matches a GitHub repository URL.
-	 * Matches against the githubUrl field in repository config.
+	 * Matches against the githubUrl or forgejoUrl field in repository config.
+	 *
+	 * Both are checked because a repo mid-migration is on both forges and a
+	 * webhook can arrive from either; matching only one silently drops the
+	 * other's events with no error to trace.
 	 */
 	private findRepositoryByGitHubUrl(
 		repoFullName: string,
 	): RepositoryConfig | null {
 		for (const repo of this.repositories.values()) {
-			if (!repo.githubUrl) continue;
-			// Match against full name (owner/repo) or URL containing it
-			if (
-				repo.githubUrl.includes(repoFullName) ||
-				repo.githubUrl.endsWith(`/${repoFullName}`)
-			) {
-				return repo;
+			for (const url of [repo.githubUrl, repo.forgejoUrl]) {
+				if (!url) continue;
+				// Match against full name (owner/repo) or URL containing it
+				if (url.includes(repoFullName) || url.endsWith(`/${repoFullName}`)) {
+					return repo;
+				}
 			}
 		}
 		return null;

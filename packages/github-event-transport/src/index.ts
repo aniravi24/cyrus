@@ -1,3 +1,5 @@
+export type { Forge, ForgeFlavor } from "./forge-flavor.js";
+export { defaultApiBaseUrl, forgeFlavor } from "./forge-flavor.js";
 export type { GitHubAppTokenProviderConfig } from "./GitHubAppTokenProvider.js";
 export {
 	createAppJwt,

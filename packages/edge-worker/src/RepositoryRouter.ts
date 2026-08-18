@@ -417,6 +417,8 @@ export class RepositoryRouter {
 					if (
 						repo.githubUrl?.endsWith(`/${repoTag.repo}`) ||
 						repo.githubUrl?.endsWith(`/${repoTag.repo}.git`) ||
+						repo.forgejoUrl?.endsWith(`/${repoTag.repo}`) ||
+						repo.forgejoUrl?.endsWith(`/${repoTag.repo}.git`) ||
 						repo.gitlabUrl?.endsWith(`/${repoTag.repo}`) ||
 						repo.gitlabUrl?.endsWith(`/${repoTag.repo}.git`)
 					) {
@@ -576,7 +578,7 @@ export class RepositoryRouter {
 
 				const fullIssue = await issueTracker.fetchIssue(issueId);
 				const project = await fullIssue?.project;
-				if (!project || !project.name) {
+				if (!project?.name) {
 					this.logger.debug(
 						`No project name found for issue ${issueId} in repository ${repo.name}`,
 					);
@@ -646,7 +648,7 @@ export class RepositoryRouter {
 
 		// Create repository options
 		const options = workspaceRepos.map((repo) => ({
-			value: repo.githubUrl || repo.gitlabUrl || repo.name,
+			value: repo.githubUrl || repo.gitlabUrl || repo.forgejoUrl || repo.name,
 		}));
 
 		// Post elicitation activity

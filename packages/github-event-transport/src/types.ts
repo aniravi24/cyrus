@@ -5,10 +5,12 @@
 import type { InternalMessage } from "cyrus-core";
 import type { FastifyInstance } from "fastify";
 
+import type { Forge } from "./forge-flavor.js";
+
 /**
  * Verification mode for GitHub webhooks forwarded from CYHOST
  * - 'proxy': Use CYRUS_API_KEY Bearer token for authentication (self-hosted)
- * - 'signature': Use x-hub-signature-256 GitHub HMAC-SHA256 signature verification (cloud)
+ * - 'signature': Use the forge's HMAC-SHA256 signature header (cloud)
  */
 export type GitHubVerificationMode = "proxy" | "signature";
 
@@ -20,8 +22,20 @@ export interface GitHubEventTransportConfig {
 	fastifyServer: FastifyInstance;
 	/** Verification mode: 'proxy' or 'signature' */
 	verificationMode: GitHubVerificationMode;
-	/** Secret for verification (CYRUS_API_KEY for proxy, GITHUB_WEBHOOK_SECRET for signature) */
+	/** Secret for verification (CYRUS_API_KEY for proxy, the forge's webhook secret for signature) */
 	secret: string;
+	/**
+	 * Which forge sends these webhooks. Defaults to GitHub. Forgejo is a Gitea
+	 * fork with GitHub-shaped payloads, so the same transport serves it; what
+	 * changes is the header names and the signature format (see forge-flavor.ts).
+	 */
+	forge?: Forge;
+	/**
+	 * Route to mount on. Defaults to `/github-webhook`. A deployment receiving
+	 * from both forges mounts two instances on different paths, because the two
+	 * use different secrets and different signature schemes.
+	 */
+	routePath?: string;
 	/** Optional IP allowlist for webhook source validation (only used in signature mode) */
 	ipAllowlist?: readonly string[];
 }
