@@ -349,6 +349,8 @@ export const RepositoryConfigSchema = z.object({
 	appendInstruction: z.string().optional(),
 	model: z.string().optional(),
 	fallbackModel: z.string().optional(),
+	/** Per-repository reasoning effort override; falls back to claudeDefaultEffort. */
+	effort: z.string().optional(),
 
 	// Label-based system prompt configuration
 	labelPrompts: LabelPromptsSchema.optional(),
@@ -393,6 +395,9 @@ export const EdgeConfigSchema = z.object({
 
 	/** Default Claude fallback model if primary Claude model is unavailable */
 	claudeDefaultFallbackModel: z.string().optional(),
+
+	/** Default Claude reasoning effort across all repositories ("low" | "medium" | "high" | "xhigh" | "max"). Unset leaves the harness default in place. */
+	claudeDefaultEffort: z.string().optional(),
 
 	/** Default Gemini model to use across all repositories (e.g., "gemini-2.5-pro") */
 	geminiDefaultModel: z.string().optional(),

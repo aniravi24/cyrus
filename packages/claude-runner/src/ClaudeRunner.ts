@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
 	type BackgroundTaskSummary,
 	type CanUseTool,
+	type EffortLevel,
 	type HookCallbackMatcher,
 	type HookEvent,
 	type PermissionResult,
@@ -655,6 +656,10 @@ export class ClaudeRunner extends EventEmitter implements IAgentRunner {
 				options: {
 					model: this.config.model || "opus",
 					fallbackModel: this.config.fallbackModel || "sonnet",
+					// Omitted when unset so the harness default stands.
+					...(this.config.effort
+						? { effort: this.config.effort as EffortLevel }
+						: {}),
 					abortController: this.abortController,
 					// Use Claude Code preset by default to maintain backward compatibility
 					// This can be overridden if systemPrompt is explicitly provided

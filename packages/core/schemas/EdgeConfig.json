@@ -99,6 +99,9 @@
 					"fallbackModel": {
 						"type": "string"
 					},
+					"effort": {
+						"type": "string"
+					},
 					"labelPrompts": {
 						"type": "object",
 						"properties": {
@@ -544,6 +547,9 @@
 			"type": "string"
 		},
 		"claudeDefaultFallbackModel": {
+			"type": "string"
+		},
+		"claudeDefaultEffort": {
 			"type": "string"
 		},
 		"geminiDefaultModel": {

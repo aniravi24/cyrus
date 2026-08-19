@@ -64,6 +64,7 @@ export interface IRunnerSelector {
 		fallbackModelOverride?: string;
 	};
 	getDefaultModelForRunner(runnerType: RunnerType): string | undefined;
+	getDefaultEffortForRunner(runnerType: RunnerType): string | undefined;
 	getDefaultFallbackModelForRunner(runnerType: RunnerType): string | undefined;
 }
 
@@ -402,6 +403,11 @@ export class RunnerConfigBuilder {
 			input.repository.model ||
 			this.runnerSelector.getDefaultModelForRunner(runnerType);
 
+		// Effort has no label/description selector - repository override, then global default.
+		const finalEffort =
+			input.repository.effort ||
+			this.runnerSelector.getDefaultEffortForRunner(runnerType);
+
 		const resolvedWorkspaceId =
 			input.linearWorkspaceId ??
 			input.requireLinearWorkspaceId(input.repository);
@@ -458,6 +464,7 @@ export class RunnerConfigBuilder {
 			),
 			// Priority order: label override > repository config > global default
 			model: finalModel,
+			...(finalEffort ? { effort: finalEffort } : {}),
 			fallbackModel:
 				fallbackModelOverride ||
 				input.repository.fallbackModel ||

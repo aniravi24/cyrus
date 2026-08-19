@@ -7297,7 +7297,7 @@ ${input.userComment}
 					this.agentSessionManager,
 					recoveryPrompt,
 					"", // No attachment manifest for recovery
-					true, // Force new session (the old claudeSessionId is stale)
+					false, // Try to resume; the resume-failed handler falls back to a fresh session
 				);
 
 				resumedCount++;
