@@ -71,6 +71,19 @@ export class RunnerSelectionService {
 	}
 
 	/**
+	 * Resolve default reasoning effort for the Claude runner.
+	 *
+	 * Returns undefined when unconfigured so the harness default stands, rather
+	 * than this service inventing one. Only Claude is covered; the other runners
+	 * carry their own reasoning controls.
+	 */
+	public getDefaultEffortForRunner(runnerType: RunnerType): string | undefined {
+		return runnerType === "claude"
+			? this.config.claudeDefaultEffort
+			: undefined;
+	}
+
+	/**
 	 * Resolve default fallback model for a given runner from config with sensible built-in defaults.
 	 * Supports legacy Claude fallback key for backwards compatibility.
 	 */
