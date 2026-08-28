@@ -35,6 +35,7 @@ const RELOAD_MERGED_KEYS = [
 	"linearWorkspaces",
 	"claudeDefaultModel",
 	"claudeDefaultFallbackModel",
+	"claudeDefaultEffort",
 	"geminiDefaultModel",
 	"codexDefaultModel",
 	"cursorDefaultModel",
@@ -312,6 +313,8 @@ export class ConfigManager extends EventEmitter {
 					parsedConfig.defaultFallbackModel ||
 					this.config.claudeDefaultFallbackModel ||
 					this.config.defaultFallbackModel,
+				claudeDefaultEffort:
+					parsedConfig.claudeDefaultEffort || this.config.claudeDefaultEffort,
 				geminiDefaultModel:
 					parsedConfig.geminiDefaultModel || this.config.geminiDefaultModel,
 				codexDefaultModel:

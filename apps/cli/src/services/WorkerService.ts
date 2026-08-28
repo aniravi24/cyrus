@@ -242,6 +242,9 @@ export class WorkerService {
 				process.env.CYRUS_DEFAULT_FALLBACK_MODEL ||
 				edgeConfig.claudeDefaultFallbackModel ||
 				edgeConfig.defaultFallbackModel,
+			claudeDefaultEffort:
+				process.env.CYRUS_CLAUDE_DEFAULT_EFFORT ||
+				edgeConfig.claudeDefaultEffort,
 			geminiDefaultModel:
 				process.env.CYRUS_GEMINI_DEFAULT_MODEL || edgeConfig.geminiDefaultModel,
 			codexDefaultModel:
