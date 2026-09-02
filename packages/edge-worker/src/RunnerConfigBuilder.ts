@@ -675,7 +675,7 @@ export class RunnerConfigBuilder {
  * Build a Stop hook that ensures the agent ships work before ending the
  * session. Inspects the working tree at the session cwd and blocks the first
  * stop attempt when there are uncommitted tracked changes or commits ahead
- * of the upstream branch. The `stop_hook_active` flag prevents infinite
+ * on no remote-tracking ref. The `stop_hook_active` flag prevents infinite
  * loops — once the hook has fired, the next stop is allowed through.
  *
  * Pre-existing untracked files (local scratch files, env files, IDE
@@ -717,8 +717,8 @@ export function buildStopHook(
 
 /**
  * Inspect the working tree at `cwd` and return a guardrail message if there
- * is unshipped work (uncommitted tracked changes or commits ahead of the
- * upstream). Returns null when the tree is clean, when `cwd` isn't a git
+ * is unshipped work (uncommitted tracked changes, or commits that are on no
+ * remote). Returns null when the tree is clean, when `cwd` isn't a git
  * repo, or when git is unavailable — in those cases the stop is not blocked.
  *
  * Uses `--untracked-files=no` so that pre-existing untracked files in the
@@ -752,20 +752,25 @@ export function inspectGitGuardrail(cwd: string, log: ILogger): string | null {
 		.filter((line) => line.length > 0);
 	const hasUncommitted = uncommittedFiles.length > 0;
 
+	// Count commits reachable from HEAD but from no remote-tracking ref. This is
+	// the literal question the guardrail message asks ("not yet on the remote"),
+	// and unlike an upstream or base-branch comparison it does not depend on how
+	// the branch was created. A worktree checked out to review someone else's PR
+	// tracks the base branch, so `@{u}..HEAD` counts that PR's own already-pushed
+	// commits and blocks every review session; `--not --remotes` reports 0 there
+	// while still reporting N for a branch the agent committed to but never pushed.
 	let unpushedCount = 0;
 	try {
-		unpushedCount = parseInt(runGit("rev-list --count @{u}..HEAD"), 10) || 0;
-	} catch {
-		// No upstream configured — fall back to comparing against origin's default branch.
-		try {
-			const baseRef = runGit("rev-parse --verify --abbrev-ref origin/HEAD");
-			if (baseRef) {
-				unpushedCount =
-					parseInt(runGit(`rev-list --count ${baseRef}..HEAD`), 10) || 0;
-			}
-		} catch {
-			// Can't determine a base — be conservative and don't block on commits alone.
+		// With no remote configured there is nowhere to push, so commits alone
+		// must not block the stop.
+		const hasRemoteRef =
+			runGit("for-each-ref --count=1 refs/remotes").length > 0;
+		if (hasRemoteRef) {
+			unpushedCount =
+				parseInt(runGit("rev-list --count HEAD --not --remotes"), 10) || 0;
 		}
+	} catch {
+		// git failed — don't block on commits alone.
 	}
 
 	if (!hasUncommitted && unpushedCount === 0) {

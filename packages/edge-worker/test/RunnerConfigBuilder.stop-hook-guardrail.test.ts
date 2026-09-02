@@ -250,4 +250,35 @@ describe("inspectGitGuardrail", () => {
 			rmSync(remote, { recursive: true, force: true });
 		}
 	});
+
+	it("returns null when HEAD is already on the remote but upstream is the base branch", () => {
+		// A worktree checked out to review someone else's PR is created with
+		// `worktree add --track -b <branch> origin/<base>`, so its upstream is the
+		// base branch rather than its own remote ref. Every commit in the PR then
+		// reads as "ahead of upstream" even though all of them are on the remote.
+		const remote = mkdtempSync(join(tmpdir(), "cyrus-stop-hook-remote-"));
+		try {
+			execSync(`git init --bare`, { cwd: remote, stdio: "ignore" });
+			git(workdir, "init -b main");
+			git(workdir, `remote add origin ${remote}`);
+			writeFileSync(join(workdir, "README.md"), "hello\n");
+			git(workdir, "add README.md");
+			git(workdir, 'commit -m "init"');
+			git(workdir, "push -u origin main");
+
+			// The PR under review: committed and pushed by its author.
+			git(workdir, "checkout -b pr-head");
+			writeFileSync(join(workdir, "feature.txt"), "feature\n");
+			git(workdir, "add feature.txt");
+			git(workdir, 'commit -m "author feature"');
+			git(workdir, "push origin pr-head");
+
+			// Cyrus points the review branch's upstream at the base branch.
+			git(workdir, "branch --set-upstream-to=origin/main pr-head");
+
+			expect(inspectGitGuardrail(workdir, silentLogger)).toBeNull();
+		} finally {
+			rmSync(remote, { recursive: true, force: true });
+		}
+	});
 });
