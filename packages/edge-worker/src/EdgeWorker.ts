@@ -182,6 +182,14 @@ import { ToolPermissionResolver } from "./ToolPermissionResolver.js";
 import type { AgentSessionData, EdgeWorkerEvents } from "./types.js";
 import { UserAccessControl } from "./UserAccessControl.js";
 
+/**
+ * A session ends a turn with this as its leading text to decline the automatic
+ * GitHub reply for that turn. Sessions that post their own PR output, or that
+ * end a turn only to wait on dispatched work, use it so the wait does not
+ * become a comment. An HTML comment so it stays invisible if one slips through.
+ */
+export const GITHUB_NO_REPLY_MARKER = "<!-- cyrus:no-reply -->";
+
 export declare interface EdgeWorker {
 	on<K extends keyof EdgeWorkerEvents>(
 		event: K,
@@ -2034,6 +2042,17 @@ ${taskSection}`;
 			if (!summary) {
 				this.logger.info(
 					"Skipping GitHub reply: session produced no final text block",
+				);
+				return;
+			}
+
+			// An opt-out for sessions that own their own PR output. A review session
+			// posts its verdict itself and ends turns midway to wait on dispatched
+			// passes; auto-replying turns each of those waits into a PR comment.
+			// Leading position only, so quoting the marker cannot silence a reply.
+			if (summary.trimStart().startsWith(GITHUB_NO_REPLY_MARKER)) {
+				this.logger.info(
+					`Skipping GitHub reply: final text opted out with ${GITHUB_NO_REPLY_MARKER}`,
 				);
 				return;
 			}
