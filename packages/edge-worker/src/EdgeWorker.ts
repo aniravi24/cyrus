@@ -2010,7 +2010,11 @@ ${taskSection}`;
 				.reverse()
 				.find((m) => m.type === "assistant");
 
-			let summary = "Task completed. Please review the changes on this branch.";
+			// No fabricated fallback here. A session that ends without a final text
+			// block has not reported anything - it was killed, rate-limited, or told
+			// to stay silent - and posting "Task completed" for it claims work that
+			// may never have happened. Say nothing instead.
+			let summary: string | null = null;
 			if (
 				lastAssistantMessage &&
 				lastAssistantMessage.type === "assistant" &&
@@ -2025,6 +2029,13 @@ ${taskSection}`;
 				if (textBlock?.text) {
 					summary = textBlock.text;
 				}
+			}
+
+			if (!summary) {
+				this.logger.info(
+					"Skipping GitHub reply: session produced no final text block",
+				);
+				return;
 			}
 
 			const owner = extractRepoOwner(event);

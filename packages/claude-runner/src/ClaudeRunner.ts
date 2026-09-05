@@ -256,6 +256,47 @@ export declare interface ClaudeRunner {
 /**
  * Manages Claude SDK sessions and communication
  */
+/**
+ * Process-wide cap on concurrently running agent sessions.
+ *
+ * Nothing upstream of the runner bounds session starts: every accepted mention
+ * spawns one immediately, so a burst (a rescue sweep re-mentioning every PR with
+ * a pending gate after a restart) starts N sessions at once and OOMs the host,
+ * which produces another burst on the next boot. Queueing instead of refusing
+ * keeps that harmless - the mention is still accepted and answered, just later.
+ */
+const MAX_CONCURRENT_SESSIONS = Math.max(
+	1,
+	Number.parseInt(process.env.CYRUS_MAX_CONCURRENT_SESSIONS ?? "4", 10) || 4,
+);
+
+let activeSessionCount = 0;
+const sessionSlotWaiters: Array<() => void> = [];
+
+async function acquireSessionSlot(): Promise<void> {
+	if (activeSessionCount < MAX_CONCURRENT_SESSIONS) {
+		activeSessionCount++;
+		return;
+	}
+	await new Promise<void>((resolve) => sessionSlotWaiters.push(resolve));
+	// The releasing session hands its slot over directly, so the count is
+	// already correct here - incrementing again would double-count it.
+}
+
+function releaseSessionSlot(): void {
+	const next = sessionSlotWaiters.shift();
+	if (next) {
+		next();
+		return;
+	}
+	activeSessionCount = Math.max(0, activeSessionCount - 1);
+}
+
+/** Sessions waiting on a slot. Exposed so callers can report queue depth. */
+export function getQueuedSessionCount(): number {
+	return sessionSlotWaiters.length;
+}
+
 export class ClaudeRunner extends EventEmitter implements IAgentRunner {
 	/**
 	 * ClaudeRunner supports streaming input via startStreaming(), addStreamMessage(), and completeStream()
@@ -461,6 +502,18 @@ export class ClaudeRunner extends EventEmitter implements IAgentRunner {
 		if (this.isRunning()) {
 			throw new Error("Claude session already running");
 		}
+
+		// Blocks while MAX_CONCURRENT_SESSIONS are already running. Released in the
+		// finally below, which covers the completion, error and abort paths alike.
+		if (
+			sessionSlotWaiters.length > 0 ||
+			activeSessionCount >= MAX_CONCURRENT_SESSIONS
+		) {
+			this.logger.info(
+				`Session queued: ${activeSessionCount}/${MAX_CONCURRENT_SESSIONS} slots busy, ${sessionSlotWaiters.length} ahead`,
+			);
+		}
+		await acquireSessionSlot();
 
 		// Initialize session info without session ID (will be set from first message)
 		this.sessionInfo = {
@@ -934,6 +987,8 @@ export class ClaudeRunner extends EventEmitter implements IAgentRunner {
 				);
 			}
 		} finally {
+			releaseSessionSlot();
+
 			// Clean up
 			this.abortController = null;
 			this.activeQuery = null;
