@@ -1,0 +1,1 @@
+{"version":3,"file":"NoopErrorReporter.d.ts","sourceRoot":"","sources":["../../src/error-reporting/NoopErrorReporter.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,oBAAoB,CAAC;AAExD;;;;;GAKG;AACH,qBAAa,iBAAkB,YAAW,aAAa;IACtD,QAAQ,CAAC,SAAS,SAAS;IAE3B,gBAAgB,IAAI,IAAI;IAIxB,cAAc,IAAI,IAAI;IAItB,GAAG,IAAI,IAAI;IAIL,KAAK,IAAI,OAAO,CAAC,OAAO,CAAC;CAG/B"}
