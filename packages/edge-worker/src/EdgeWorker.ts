@@ -1577,7 +1577,7 @@ export class EdgeWorker extends EventEmitter {
 					disallowedTools,
 					undefined, // resumeSessionId
 					undefined, // labels
-					undefined, // issueDescription
+					extractCommentBody(event) ?? undefined, // issueDescription - carries [model=...] / [agent=...] selectors
 					200, // maxTurns
 					undefined, // linearWorkspaceId
 					this.buildSkillSessionContext(repository, undefined, session),
@@ -2335,7 +2335,7 @@ ${taskSection}`;
 					disallowedTools,
 					undefined, // resumeSessionId
 					undefined, // labels
-					undefined, // issueDescription
+					undefined, // issueDescription - GitLab event type has no GitHub body extractor
 					200, // maxTurns
 					undefined, // linearWorkspaceId
 					this.buildSkillSessionContext(repository, undefined, session),
