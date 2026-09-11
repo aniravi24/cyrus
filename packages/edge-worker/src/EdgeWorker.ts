@@ -190,6 +190,27 @@ import { UserAccessControl } from "./UserAccessControl.js";
  */
 export const GITHUB_NO_REPLY_MARKER = "<!-- cyrus:no-reply -->";
 
+/**
+ * Pull runner selectors out of a GitHub comment, honouring them only where an
+ * automation would put them: leading whitespace, the bot mention, then the tags.
+ *
+ * Cyrus matches `[model=...]` anywhere in a description, which is safe for a
+ * Linear issue body but not for an arbitrary PR comment - quoting an earlier
+ * mention would silently re-route the session, and an `[agent=...]` naming a
+ * runner this deployment has no key for kills it outright. Anchoring keeps the
+ * automation's own tags working and makes a quoted or incidental tag inert.
+ */
+export function extractLeadingRunnerSelectors(
+	commentBody: string,
+	botUsername: string | undefined,
+): string | undefined {
+	const handle = botUsername ? `@${botUsername}` : "@[\\w-]+";
+	const match = commentBody.match(
+		new RegExp(`^\\s*${handle}\\s*((?:\\[(?:model|agent)=[^\\]]+\\]\\s*)+)`, "i"),
+	);
+	return match?.[1]?.trim() || undefined;
+}
+
 export declare interface EdgeWorker {
 	on<K extends keyof EdgeWorkerEvents>(
 		event: K,
@@ -1577,7 +1598,7 @@ export class EdgeWorker extends EventEmitter {
 					disallowedTools,
 					undefined, // resumeSessionId
 					undefined, // labels
-					extractCommentBody(event) ?? undefined, // issueDescription - carries [model=...] / [agent=...] selectors
+					extractLeadingRunnerSelectors(commentBody, botUsername), // issueDescription - carries only leading [model=...] / [agent=...] selectors
 					200, // maxTurns
 					undefined, // linearWorkspaceId
 					this.buildSkillSessionContext(repository, undefined, session),
