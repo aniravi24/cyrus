@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { cwd } from "node:process";
 import type { IAgentRunner, IMessageFormatter, SDKMessage } from "cyrus-core";
 import { OmpMessageFormatter } from "./formatter.js";
+import { stageOmpAgents } from "./OmpAgentStager.js";
 import { OmpEventMapper } from "./OmpEventMapper.js";
 import { OmpRpcProcess } from "./OmpRpcProcess.js";
 import type {
@@ -232,6 +233,7 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 		}
 		const overlay = this.writeSkillOverlay();
 		if (overlay) args.push("--config", overlay);
+		this.stageAgents();
 		for (const extra of this.config.configOverlays ?? []) {
 			args.push("--config", extra);
 		}
@@ -244,11 +246,40 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 	 * `skills.customDirectories`, so the plugin roots are written into a config
 	 * overlay instead of being staged into a provider-specific layout.
 	 */
-	private writeSkillOverlay(): string | null {
-		const roots = (this.config.plugins ?? [])
+	/**
+	 * Translate Cyrus's plugin subagent definitions into omp's task-agent
+	 * contract. Without this a `subagent_type` dispatch fails and the caller
+	 * degrades to a bare model at default effort - for the review skill that
+	 * silently loses the pinned model and reasoning effort of every pass.
+	 */
+	private stageAgents(): void {
+		const roots = this.pluginPaths();
+		if (roots.length === 0) return;
+		try {
+			const staged = stageOmpAgents(roots, {
+				...process.env,
+				...this.config.env,
+			});
+			if (staged.length > 0) {
+				this.config.logger?.debug?.(
+					`Staged omp task agents: ${staged.join(", ")}`,
+				);
+			}
+		} catch (error) {
+			// A missing agent definition degrades the review passes; it must not
+			// take the session down with it.
+			this.emitError(error instanceof Error ? error : new Error(String(error)));
+		}
+	}
+
+	private pluginPaths(): string[] {
+		return (this.config.plugins ?? [])
 			.map((plugin) => (typeof plugin.path === "string" ? plugin.path : null))
-			.filter((path): path is string => path !== null)
-			.map((path) => join(path, "skills"));
+			.filter((path): path is string => path !== null);
+	}
+
+	private writeSkillOverlay(): string | null {
+		const roots = this.pluginPaths().map((path) => join(path, "skills"));
 		if (roots.length === 0) return null;
 
 		const dir = join(this.config.cyrusHome, "omp-overlays");
