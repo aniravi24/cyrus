@@ -31,6 +31,7 @@ function makeChatBuilder(defaultRunner: RunnerType): RunnerConfigBuilder {
 		determineRunnerSelection: () => ({ runnerType: "claude" as const }),
 		getDefaultRunner: () => defaultRunner,
 		getDefaultModelForRunner: () => "",
+		getDefaultEffortForRunner: () => undefined,
 		getDefaultFallbackModelForRunner: () => "",
 	};
 	return new RunnerConfigBuilder(
@@ -54,6 +55,7 @@ function makeIssueBuilder(
 		determineRunnerSelection: () => ({ runnerType }),
 		getDefaultRunner: () => runnerType,
 		getDefaultModelForRunner: () => "",
+		getDefaultEffortForRunner: () => undefined,
 		getDefaultFallbackModelForRunner: () => "",
 	};
 	return new RunnerConfigBuilder(

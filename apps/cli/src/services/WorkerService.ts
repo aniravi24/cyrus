@@ -255,6 +255,12 @@ export class WorkerService {
 			opencodeDefaultFallbackModel:
 				process.env.CYRUS_OPENCODE_DEFAULT_FALLBACK_MODEL ||
 				edgeConfig.opencodeDefaultFallbackModel,
+			ompDefaultModel:
+				process.env.CYRUS_OMP_DEFAULT_MODEL || edgeConfig.ompDefaultModel,
+			ompDefaultFallbackModel:
+				process.env.CYRUS_OMP_DEFAULT_FALLBACK_MODEL ||
+				edgeConfig.ompDefaultFallbackModel,
+			omp: edgeConfig.omp,
 			inferOpenCodeRunnerFromProviderModel:
 				parseBooleanEnv(
 					process.env.CYRUS_INFER_OPENCODE_RUNNER_FROM_PROVIDER_MODEL,
@@ -266,6 +272,7 @@ export class WorkerService {
 					| "codex"
 					| "cursor"
 					| "opencode"
+					| "omp"
 					| undefined) || edgeConfig.defaultRunner,
 			webhookBaseUrl: process.env.CYRUS_BASE_URL,
 			serverPort: parsePort(process.env.CYRUS_SERVER_PORT, DEFAULT_SERVER_PORT),
