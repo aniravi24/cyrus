@@ -392,7 +392,13 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 	/** Emit a terminal error result, then settle and finalize the run. */
 	private failRun(reason: string): void {
 		if (this.finalized) return;
-		this.pushMessage(this.mapper.errorResult(`${OMP_ABORT_MARKER} ${reason}`));
+		const text = `${OMP_ABORT_MARKER} ${reason}`;
+		// The assistant text block is what surfaces the abort. Cyrus builds its
+		// GitHub reply from the last assistant message and refuses to invent one,
+		// so a result carrying the reason only in `errors[]` posts nothing - and a
+		// review whose gate was already armed then stays pending forever.
+		this.pushMessage(this.mapper.abortNotice(text));
+		this.pushMessage(this.mapper.errorResult(text));
 		this.settleRun();
 		this.finalize();
 	}

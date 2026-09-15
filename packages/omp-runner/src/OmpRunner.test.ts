@@ -92,6 +92,20 @@ describe("OmpRunner", () => {
 		expect(errors.join(" ")).toContain(OMP_ABORT_MARKER);
 		expect(errors.join(" ")).toContain("No API key found");
 		expect(runner.isRunning()).toBe(false);
+
+		// Cyrus builds its GitHub reply from the last assistant TEXT block and
+		// invents nothing, so an abort that only fills `errors[]` posts no comment
+		// and leaves an armed review gate pending forever.
+		const assistant = runner
+			.getMessages()
+			.filter((m) => m.type === "assistant")
+			.flatMap((m) =>
+				m.type === "assistant"
+					? m.message.content.map((b) => (b.type === "text" ? b.text : ""))
+					: [],
+			);
+		expect(assistant.join(" ")).toContain(OMP_ABORT_MARKER);
+		expect(assistant.join(" ")).toContain("No API key found");
 	});
 
 	it("still produces a result when omp exits without finishing the run", async () => {
