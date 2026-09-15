@@ -1,17 +1,18 @@
 name: Fork CI
 
-# Upstream's ci.yml only triggers on `main` and `cypack-*`, so the fork branches
-# that downstream deployments actually consume were never built or tested on
-# push. This workflow covers them.
+# Upstream's ci.yml only triggers on `main` and `cypack-*` of ITS repo; this
+# fork's main carries our patches, and before this workflow existed nothing
+# built or tested them on push. Two stale test fixtures had been broken for a
+# release because of it.
 
 on:
   push:
     branches:
-      - 'fix/stale-session-recovery'
+      - main
       - 'feat/**'
+      - 'fix/**'
   pull_request:
-    branches:
-      - 'fix/stale-session-recovery'
+    branches: [main]
   workflow_dispatch:
 
 permissions:
