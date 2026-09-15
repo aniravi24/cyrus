@@ -80,6 +80,7 @@ describe("JSON Schema export", () => {
 				"codex",
 				"cursor",
 				"opencode",
+				"omp",
 			]);
 		});
 

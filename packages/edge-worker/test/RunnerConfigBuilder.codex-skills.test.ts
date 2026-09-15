@@ -25,6 +25,7 @@ function makeBuilder(): RunnerConfigBuilder {
 	const runnerSelector: IRunnerSelector = {
 		determineRunnerSelection: () => ({ runnerType: "codex" as const }),
 		getDefaultModelForRunner: () => "gpt-5.5",
+		getDefaultEffortForRunner: () => undefined,
 		getDefaultFallbackModelForRunner: () => "gpt-5.2-codex",
 	};
 	return new RunnerConfigBuilder(

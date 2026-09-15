@@ -26,6 +26,7 @@ function makeBuilder(): RunnerConfigBuilder {
 	const runnerSelector: IRunnerSelector = {
 		determineRunnerSelection: () => ({ runnerType: "claude" as const }),
 		getDefaultModelForRunner: () => "opus",
+		getDefaultEffortForRunner: () => undefined,
 		getDefaultFallbackModelForRunner: () => "sonnet",
 	};
 	return new RunnerConfigBuilder(

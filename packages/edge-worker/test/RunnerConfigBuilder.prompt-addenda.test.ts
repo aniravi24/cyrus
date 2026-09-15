@@ -29,6 +29,7 @@ function makeBuilder(): RunnerConfigBuilder {
 		determineRunnerSelection: () => ({ runnerType: "claude" as const }),
 		getDefaultRunner: () => "claude",
 		getDefaultModelForRunner: () => "",
+		getDefaultEffortForRunner: () => undefined,
 		getDefaultFallbackModelForRunner: () => "",
 	};
 	return new RunnerConfigBuilder(
