@@ -1,0 +1,66 @@
+name: Fork Upstream Watch
+
+# A fork is only as safe as its knowledge of how far behind it is. Renovate can
+# tell a consumer that a newer fork tag exists, but nothing tells the fork that
+# upstream moved. This opens (or updates) one issue when it does.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: fork-upstream-watch
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Compare against upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/stale-session-recovery
+
+      - name: Compare versions and report drift
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPO: ceedaragents/cyrus
+        run: |
+          set -euo pipefail
+          ours="$(jq -r .version apps/cli/package.json)"
+          latest="$(gh release view --repo "$UPSTREAM_REPO" --json tagName --jq .tagName)"
+          latest="${latest#v}"
+          echo "fork base: v${ours} · upstream latest: v${latest}"
+
+          if [ "$ours" = "$latest" ]; then
+            echo "Up to date with upstream."
+            exit 0
+          fi
+
+          title="Rebase fork onto upstream v${latest}"
+          body="$(mktemp)"
+          {
+            printf 'The fork source branch is based on upstream `v%s`; upstream has released `v%s`.\n\n' "$ours" "$latest"
+            printf 'Rebasing transplants only the fork patches:\n\n'
+            printf '    git rebase --onto v%s v%s fix/stale-session-recovery\n\n' "$latest" "$ours"
+            printf 'Verify ancestry first - upstream rewrites release-prep commits, which orphans\n'
+            printf "the old tag's lineage and makes a plain rebase replay the entire old branch:\n\n"
+            printf '    git merge-base --is-ancestor v%s v%s\n\n' "$ours" "$latest"
+            printf 'After the rebase, dispatch **Fork Release** to rebuild the dist branch and cut\n'
+            printf 'a new `v%s-fork.1` tag, then bump the consumer pin.\n' "$latest"
+          } > "$body"
+
+          existing="$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "$body"
+          else
+            gh issue create --title "$title" --body-file "$body"
+          fi

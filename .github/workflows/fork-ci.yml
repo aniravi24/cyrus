@@ -1,0 +1,52 @@
+name: Fork CI
+
+# Upstream's ci.yml only triggers on `main` and `cypack-*`, so the fork branches
+# that downstream deployments actually consume were never built or tested on
+# push. This workflow covers them.
+
+on:
+  push:
+    branches:
+      - 'fix/stale-session-recovery'
+      - 'feat/**'
+  pull_request:
+    branches:
+      - 'fix/stale-session-recovery'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Enable pnpm
+        run: corepack enable pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # A fork patch that no longer compiles against the rebased upstream API is
+      # the failure mode this exists to catch, so build before anything else.
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test:run
