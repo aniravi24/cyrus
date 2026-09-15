@@ -227,6 +227,11 @@ export class OmpEventMapper {
 		return [this.result(this.lastAssistantText || "OMP session completed")];
 	}
 
+	/** Assistant text for an aborted run; consumers read the reason from here. */
+	abortNotice(text: string): SDKMessage {
+		return this.assistant([{ type: "text", text }]);
+	}
+
 	errorResult(errorMessage: string): SDKResultMessage {
 		return {
 			type: "result",
