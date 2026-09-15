@@ -110,14 +110,14 @@ describe("OmpEventMapper", () => {
 
 	it("labels subagent progress so task fan-out is visible in the timeline", () => {
 		const messages = newMapper().map({
-			label: "DealAudit",
-			message: "scanning marts",
+			label: "scout",
+			message: "reading src/index.ts",
 			type: "subagent_progress",
 		});
 		const block =
 			messages[0]?.type === "assistant" ? messages[0].message.content[0] : null;
 		expect(block && "text" in block ? block.text : "").toBe(
-			"[DealAudit] scanning marts",
+			"[scout] reading src/index.ts",
 		);
 	});
 });

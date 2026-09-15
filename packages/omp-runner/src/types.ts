@@ -25,6 +25,22 @@ export interface OmpRunnerConfig extends AgentRunnerConfig {
 	includeThinking?: boolean;
 }
 
+/** `get_session_stats` payload: omp's own accounting for the live session. */
+export interface OmpSessionStats {
+	assistantMessages?: number;
+	toolCalls?: number;
+	cost?: number;
+	tokens?: {
+		input?: number;
+		output?: number;
+		reasoning?: number;
+		cacheRead?: number;
+		cacheWrite?: number;
+		total?: number;
+	};
+	routedModels?: Record<string, number>;
+}
+
 export interface OmpSessionInfo extends AgentSessionInfo {
 	sessionId: string | null;
 }

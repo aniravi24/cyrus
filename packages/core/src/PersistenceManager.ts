@@ -49,6 +49,7 @@ interface V2CyrusAgentSession {
 	codexSessionId?: string;
 	cursorSessionId?: string;
 	opencodeSessionId?: string;
+	ompSessionId?: string;
 	metadata?: Record<string, unknown>;
 }
 
@@ -329,6 +330,7 @@ export class PersistenceManager {
 			codexSessionId: v2Session.codexSessionId,
 			cursorSessionId: v2Session.cursorSessionId,
 			opencodeSessionId: v2Session.opencodeSessionId,
+			ompSessionId: v2Session.ompSessionId,
 			metadata: v2Session.metadata,
 			// New field: structured issue context
 			issueContext,

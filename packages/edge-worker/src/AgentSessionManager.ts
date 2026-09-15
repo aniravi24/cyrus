@@ -255,7 +255,9 @@ export class AgentSessionManager extends EventEmitter {
 						? "cursor"
 						: runner?.constructor.name === "OpenCodeRunner"
 							? "opencode"
-							: "claude";
+							: runner?.constructor.name === "OmpRunner"
+								? "omp"
+								: "claude";
 
 		// Update the appropriate session ID based on runner type
 		if (runnerType === "gemini") {
@@ -266,6 +268,8 @@ export class AgentSessionManager extends EventEmitter {
 			linearSession.cursorSessionId = claudeSystemMessage.session_id;
 		} else if (runnerType === "opencode") {
 			linearSession.opencodeSessionId = claudeSystemMessage.session_id;
+		} else if (runnerType === "omp") {
+			linearSession.ompSessionId = claudeSystemMessage.session_id;
 		} else {
 			linearSession.claudeSessionId = claudeSystemMessage.session_id;
 		}
@@ -315,7 +319,9 @@ export class AgentSessionManager extends EventEmitter {
 						? "cursor"
 						: runner?.constructor.name === "OpenCodeRunner"
 							? "opencode"
-							: "claude";
+							: runner?.constructor.name === "OmpRunner"
+								? "omp"
+								: "claude";
 
 		const sessionEntry: CyrusAgentSessionEntry = {
 			// Set the appropriate session ID based on runner type
@@ -327,7 +333,9 @@ export class AgentSessionManager extends EventEmitter {
 						? { cursorSessionId: sdkMessage.session_id }
 						: runnerType === "opencode"
 							? { opencodeSessionId: sdkMessage.session_id }
-							: { claudeSessionId: sdkMessage.session_id }),
+							: runnerType === "omp"
+								? { ompSessionId: sdkMessage.session_id }
+								: { claudeSessionId: sdkMessage.session_id }),
 			type: sdkMessage.type,
 			content: this.extractContent(sdkMessage),
 			metadata: {
@@ -724,7 +732,9 @@ export class AgentSessionManager extends EventEmitter {
 						? "cursor"
 						: runner?.constructor.name === "OpenCodeRunner"
 							? "opencode"
-							: "claude";
+							: runner?.constructor.name === "OmpRunner"
+								? "omp"
+								: "claude";
 
 		// For error results, content may be in errors[] rather than result.
 		const resultText =
@@ -790,7 +800,9 @@ export class AgentSessionManager extends EventEmitter {
 						? { cursorSessionId: resultMessage.session_id }
 						: runnerType === "opencode"
 							? { opencodeSessionId: resultMessage.session_id }
-							: { claudeSessionId: resultMessage.session_id }),
+							: runnerType === "omp"
+								? { ompSessionId: resultMessage.session_id }
+								: { claudeSessionId: resultMessage.session_id }),
 			type: "result",
 			content,
 			metadata: {
@@ -2043,7 +2055,9 @@ export class AgentSessionManager extends EventEmitter {
 					? "cursor"
 					: runner?.constructor.name === "OpenCodeRunner"
 						? "opencode"
-						: "claude";
+						: runner?.constructor.name === "OmpRunner"
+							? "omp"
+							: "claude";
 	}
 
 	/**

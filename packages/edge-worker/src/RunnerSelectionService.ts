@@ -1,5 +1,17 @@
 import type { EdgeWorkerConfig, RunnerType } from "cyrus-core";
 
+/**
+ * The repository's `[model=...]` selectors are Claude Code aliases. omp resolves
+ * them by fuzzy match, which is NOT newest-first - `sonnet` lands on
+ * `claude-sonnet-4-0` - so each alias is pinned to the current model instead.
+ */
+const OMP_ALIAS_MODELS: Record<string, string> = {
+	fable: "anthropic/claude-fable-5-1",
+	haiku: "anthropic/claude-haiku-4-5",
+	opus: "anthropic/claude-opus-5",
+	sonnet: "anthropic/claude-sonnet-5",
+};
+
 export class RunnerSelectionService {
 	private config: EdgeWorkerConfig;
 
@@ -67,6 +79,9 @@ export class RunnerSelectionService {
 		if (runnerType === "opencode") {
 			return this.config.opencodeDefaultModel;
 		}
+		if (runnerType === "omp") {
+			return this.config.ompDefaultModel;
+		}
 		return this.config.codexDefaultModel || "gpt-5.5";
 	}
 
@@ -109,6 +124,9 @@ export class RunnerSelectionService {
 		if (runnerType === "opencode") {
 			return this.config.opencodeDefaultFallbackModel;
 		}
+		if (runnerType === "omp") {
+			return this.config.ompDefaultFallbackModel;
+		}
 		return "gpt-5";
 	}
 
@@ -134,7 +152,7 @@ export class RunnerSelectionService {
 	 * Determine runner type and model using labels + issue description tags.
 	 *
 	 * Supported description tags:
-	 * - [agent=claude|gemini|codex|cursor|opencode]
+	 * - [agent=claude|gemini|codex|cursor|opencode|omp]
 	 * - [model=<model-name>]
 	 *
 	 * Supported Linear label selectors:
@@ -173,6 +191,7 @@ export class RunnerSelectionService {
 			codex: this.getDefaultModelForRunner("codex"),
 			cursor: this.getDefaultModelForRunner("cursor"),
 			opencode: this.getDefaultModelForRunner("opencode"),
+			omp: this.getDefaultModelForRunner("omp"),
 		};
 		const defaultFallbackByRunner: Record<RunnerType, string | undefined> = {
 			claude: this.getDefaultFallbackModelForRunner("claude"),
@@ -180,6 +199,7 @@ export class RunnerSelectionService {
 			codex: this.getDefaultFallbackModelForRunner("codex"),
 			cursor: this.getDefaultFallbackModelForRunner("cursor"),
 			opencode: this.getDefaultFallbackModelForRunner("opencode"),
+			omp: this.getDefaultFallbackModelForRunner("omp"),
 		};
 
 		const isCodexModel = (model: string): boolean =>
@@ -249,6 +269,13 @@ export class RunnerSelectionService {
 			if (runnerType === "opencode") {
 				return defaultFallbackByRunner.opencode;
 			}
+			if (runnerType === "omp") {
+				if (normalizedModel === "fable") return "opus";
+				if (normalizedModel === "opus") return "sonnet";
+				if (normalizedModel === "sonnet") return "haiku";
+				if (normalizedModel === "haiku") return "sonnet";
+				return defaultFallbackByRunner.omp;
+			}
 			if (isCodexModel(normalizedModel)) {
 				return "gpt-5.2-codex";
 			}
@@ -257,6 +284,7 @@ export class RunnerSelectionService {
 
 		const resolveRunnerFromName = (name?: string): RunnerType | undefined => {
 			if (!name) return undefined;
+			if (name === "omp") return "omp";
 			if (name === "opencode") return "opencode";
 			if (name === "cursor") return "cursor";
 			if (name === "codex" || name === "openai") return "codex";
@@ -268,6 +296,9 @@ export class RunnerSelectionService {
 		const resolveAgentFromLabel = (
 			lowercaseLabels: string[],
 		): RunnerType | undefined => {
+			if (lowercaseLabels.includes("omp")) {
+				return "omp";
+			}
 			if (lowercaseLabels.includes("opencode")) {
 				return "opencode";
 			}
@@ -364,36 +395,49 @@ export class RunnerSelectionService {
 			providerModelFromLabels?.model || resolveModelFromLabel(normalizedLabels);
 		const explicitModel = modelFromDescription || modelFromLabels;
 
-		const runnerType: RunnerType =
+		const explicitAgent =
 			resolvedAgentFromDescription ||
 			providerModelFromLabels?.runnerType ||
-			resolvedAgentFromLabels ||
-			inferRunnerFromModel(explicitModel) ||
-			this.getDefaultRunner();
+			resolvedAgentFromLabels;
+		const configuredRunner = this.getDefaultRunner();
+		// omp serves every provider's models, so a bare model selector such as
+		// `[model=sonnet]` must not silently route the session to the Claude
+		// harness and ignore the configured default.
+		const runnerType: RunnerType =
+			explicitAgent ??
+			(configuredRunner === "omp"
+				? "omp"
+				: (inferRunnerFromModel(explicitModel) ?? configuredRunner));
 
 		// If an explicit agent conflicts with model's implied runner, keep the agent and reset model.
-		const modelRunner = inferRunnerFromModel(explicitModel);
+		const modelRunner =
+			runnerType === "omp" ? undefined : inferRunnerFromModel(explicitModel);
 		let modelOverride = explicitModel;
 		if (modelOverride && modelRunner && modelRunner !== runnerType) {
 			modelOverride = undefined;
 		}
 
-		const resolvedModelOverride =
+		const selectedModel =
 			modelOverride ||
 			defaultModelByRunner[runnerType] ||
 			this.getDefaultModelForRunner(runnerType);
 
-		let fallbackModelOverride = resolvedModelOverride
-			? inferFallbackModel(resolvedModelOverride, runnerType)
+		let selectedFallback = selectedModel
+			? inferFallbackModel(selectedModel, runnerType)
 			: undefined;
-		if (!fallbackModelOverride) {
-			fallbackModelOverride = defaultFallbackByRunner[runnerType];
+		if (!selectedFallback) {
+			selectedFallback = defaultFallbackByRunner[runnerType];
 		}
+
+		const forOmp = (model: string | undefined): string | undefined =>
+			model && runnerType === "omp"
+				? (OMP_ALIAS_MODELS[model.toLowerCase()] ?? model)
+				: model;
 
 		return {
 			runnerType,
-			modelOverride: resolvedModelOverride,
-			fallbackModelOverride,
+			modelOverride: forOmp(selectedModel),
+			fallbackModelOverride: forOmp(selectedFallback),
 		};
 	}
 }

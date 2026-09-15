@@ -10,6 +10,7 @@ import {
 import { CursorRunner } from "cyrus-cursor-runner";
 import { GeminiRunner } from "cyrus-gemini-runner";
 import { LinearEventTransport } from "cyrus-linear-event-transport";
+import { OmpRunner } from "cyrus-omp-runner";
 import { OpenCodeRunner } from "cyrus-opencode-runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSessionManager } from "../src/AgentSessionManager.js";
@@ -31,6 +32,7 @@ vi.mock("cyrus-claude-runner");
 vi.mock("cyrus-codex-runner");
 vi.mock("cyrus-cursor-runner");
 vi.mock("cyrus-gemini-runner");
+vi.mock("cyrus-omp-runner");
 vi.mock("cyrus-opencode-runner");
 vi.mock("cyrus-linear-event-transport");
 vi.mock("@linear/sdk");
@@ -61,6 +63,7 @@ describe("EdgeWorker - Runner Selection Based on Labels", () => {
 	let mockCursorRunner: any;
 	let mockGeminiRunner: any;
 	let mockOpenCodeRunner: any;
+	let mockOmpRunner: any;
 	let mockAgentSessionManager: any;
 	let capturedRunnerType: RunnerType | null = null;
 	let capturedRunnerConfig: any = null;
@@ -211,6 +214,24 @@ describe("EdgeWorker - Runner Selection Based on Labels", () => {
 			capturedRunnerType = "opencode" as RunnerType;
 			capturedRunnerConfig = config;
 			return mockOpenCodeRunner;
+		});
+
+		// Mock OmpRunner
+		mockOmpRunner = {
+			supportsStreamingInput: true,
+			start: vi.fn().mockResolvedValue({ sessionId: "omp-session-123" }),
+			startStreaming: vi
+				.fn()
+				.mockResolvedValue({ sessionId: "omp-session-123" }),
+			stop: vi.fn(),
+			isStreaming: vi.fn().mockReturnValue(false),
+			addStreamMessage: vi.fn(),
+			updatePromptVersions: vi.fn(),
+		};
+		vi.mocked(OmpRunner).mockImplementation(function (config: any) {
+			capturedRunnerType = "omp" as RunnerType;
+			capturedRunnerConfig = config;
+			return mockOmpRunner;
 		});
 
 		// Mock AgentSessionManager
@@ -778,6 +799,39 @@ Issue: {{issue_identifier}}`;
 			);
 			expect(capturedRunnerConfig.allowedTools).toEqual(["Read", "Edit"]);
 			expect(capturedRunnerConfig.model).toBeUndefined();
+		});
+
+		it("should select OMP runner from [agent=omp] description tag", async () => {
+			const mockIssue = createMockIssueWithLabels(
+				["bug"],
+				"Work item\\n\\n[agent=omp]",
+			);
+			mockLinearClient.issue.mockResolvedValue(mockIssue);
+
+			const webhook: LinearAgentSessionCreatedWebhook = {
+				type: "Issue",
+				action: "agentSessionCreated",
+				organizationId: "test-workspace",
+				agentSession: {
+					id: "agent-session-123",
+					issue: {
+						id: "issue-123",
+						identifier: "TEST-123",
+						team: { key: "TEST" },
+					},
+					comment: { body: "@cyrus work on this" },
+				},
+			};
+
+			await (edgeWorker as any).handleAgentSessionCreatedWebhook(webhook, [
+				mockRepository,
+			]);
+
+			expect(capturedRunnerType).toBe("omp");
+			expect(OmpRunner).toHaveBeenCalled();
+			expect(capturedRunnerConfig.workingDirectory).toBe(
+				"/test/workspaces/TEST-123",
+			);
 		});
 
 		it("should let [agent=opencode] description selector override Claude labels", async () => {

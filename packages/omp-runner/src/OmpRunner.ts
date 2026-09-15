@@ -11,6 +11,7 @@ import type {
 	OmpFrame,
 	OmpRunnerConfig,
 	OmpSessionInfo,
+	OmpSessionStats,
 } from "./types.js";
 
 const DEFAULT_MODEL_DISPLAY = "omp default model";
@@ -244,13 +245,39 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 			return;
 		}
 
-		for (const message of this.mapper.map(frame)) this.pushMessage(message);
-
 		// `isTerminal: false` means omp scheduled more work, so the run has not
 		// settled yet and Cyrus must not treat it as completion.
 		if (frame.type === "agent_end" && frame.isTerminal !== false) {
-			this.settleRun();
+			void this.finishRun(frame);
+			return;
 		}
+
+		for (const message of this.mapper.map(frame)) this.pushMessage(message);
+	}
+
+	/**
+	 * The result message carries the session's cost and token totals, and omp
+	 * only reports those on request, so the stats round-trip has to complete
+	 * before the terminal `agent_end` is mapped. A failed or slow stats call
+	 * degrades to zeroed accounting rather than withholding the result.
+	 */
+	private async finishRun(frame: OmpFrame): Promise<void> {
+		try {
+			const response = await this.process?.command(
+				{ type: "get_session_stats" },
+				10_000,
+			);
+			if (response?.success && response.data) {
+				// Every field on OmpSessionStats is optional, so a payload change
+				// degrades to zeroed accounting instead of a wrong number.
+				const stats = response.data as OmpSessionStats;
+				this.mapper.applySessionStats(stats);
+			}
+		} catch (error) {
+			this.emitError(error instanceof Error ? error : new Error(String(error)));
+		}
+		for (const message of this.mapper.map(frame)) this.pushMessage(message);
+		this.settleRun();
 	}
 
 	/**
