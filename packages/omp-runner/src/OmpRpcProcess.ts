@@ -10,11 +10,7 @@ import type {
 
 const FORCE_KILL_DELAY_MS = 5_000;
 
-/**
- * Wire boundary: omp's stdout is trusted to be JSONL objects carrying a string
- * `type`, which is checked here. The assertion narrows that checked shape to the
- * frame union; unmodeled frame types fall through every consumer's default arm.
- */
+/** Wire boundary: checks the JSONL object carries a string `type`, then narrows to the frame union. */
 function parseFrame(line: string): OmpFrame | null {
 	let value: unknown;
 	try {
@@ -62,11 +58,7 @@ export class OmpRpcProcess extends EventEmitter {
 		super();
 	}
 
-	/**
-	 * Spawns omp and resolves on its `ready` frame, after negotiating protocol
-	 * v2 when advertised. V1 truncates any stdout object above 1 MiB, which a
-	 * large tool result reaches easily, so the negotiation is not optional.
-	 */
+	/** Spawns omp and resolves on `ready`, negotiating v2 - v1 truncates stdout objects over 1 MiB. */
 	async start(readyTimeoutMs = 30_000): Promise<OmpReadyFrame> {
 		const child = spawn(this.options.ompPath, this.options.args, {
 			cwd: this.options.cwd,
@@ -116,12 +108,7 @@ export class OmpRpcProcess extends EventEmitter {
 		return ready;
 	}
 
-	/**
-	 * Fire-and-forget frame (no id correlation). Dropped when the child is gone:
-	 * callers use this on teardown paths that legitimately run after omp exited,
-	 * and throwing there would break the caller's cleanup rather than report
-	 * anything actionable.
-	 */
+	/** Fire-and-forget; dropped when the child is gone, since teardown paths run after omp exits. */
 	notify(frame: Record<string, unknown>): void {
 		if (!this.child || this.exited) return;
 		this.write(frame);
@@ -197,11 +184,7 @@ export class OmpRpcProcess extends EventEmitter {
 		}
 	}
 
-	/**
-	 * Accumulates a v2 chunk sequence. The protocol requires rejecting
-	 * interleaved or out-of-order sequences rather than stitching them, so a
-	 * mismatch drops the whole sequence instead of yielding a corrupt object.
-	 */
+	/** Accumulates a v2 chunk sequence; an interleaved or out-of-order chunk drops the whole sequence. */
 	private absorbChunk(frame: OmpChunkFrame): OmpFrame | null {
 		const { byteLength, chunkId, count, data, index } = frame;
 

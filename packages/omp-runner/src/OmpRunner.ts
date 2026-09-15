@@ -18,11 +18,7 @@ import type {
 
 const DEFAULT_MODEL_DISPLAY = "omp default model";
 
-/**
- * Stable marker on every aborted-session result. Downstream automation keys off
- * it to tell "the agent could not run at all" apart from "the agent reported a
- * problem", without matching on provider error prose that changes upstream.
- */
+/** Marker on every aborted-session result; automation keys off it instead of provider error prose. */
 export const OMP_ABORT_MARKER = "[omp:aborted]";
 
 /** Commands whose failure ends the run rather than just the command. */
@@ -42,12 +38,9 @@ const BLOCKING_UI_METHODS: Record<string, true> = {
 };
 
 /**
- * Runs a Cyrus session on omp (`omp --mode rpc`) and projects its event stream
- * onto the Claude-SDK messages the edge worker consumes.
- *
- * The tool surface belongs to omp, not to Cyrus: `allowedTools` is not
- * forwarded, so the session keeps omp's full capability set (subagents, eval,
- * browser, lsp). Guard enforcement is the repository's own hooks.
+ * Runs a Cyrus session on `omp --mode rpc`, projecting its events onto the
+ * Claude-SDK messages the edge worker consumes. `allowedTools` is deliberately
+ * not forwarded: the tool surface is omp's, and guards are the repo's own hooks.
  */
 export class OmpRunner extends EventEmitter implements IAgentRunner {
 	readonly supportsStreamingInput = true;
@@ -264,18 +257,8 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 		return args;
 	}
 
-	/**
-	 * Cyrus ships its workflow skills as SDK plugin directories, which only the
-	 * Claude runner reads natively. omp discovers them through
-	 * `skills.customDirectories`, so the plugin roots are written into a config
-	 * overlay instead of being staged into a provider-specific layout.
-	 */
-	/**
-	 * Translate Cyrus's plugin subagent definitions into omp's task-agent
-	 * contract. Without this a `subagent_type` dispatch fails and the caller
-	 * degrades to a bare model at default effort - for the review skill that
-	 * silently loses the pinned model and reasoning effort of every pass.
-	 */
+	/** omp finds plugin skills via `skills.customDirectories`, so the roots go in a config overlay. */
+	/** Without this, a `subagent_type` dispatch fails and each pass silently drops to a bare default model. */
 	private stageAgents(): void {
 		const roots = this.pluginPaths();
 		if (roots.length === 0) return;
@@ -327,10 +310,8 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 			return;
 		}
 
-		// `prompt` is acknowledged before the agent starts and can fail later with
-		// the same id and no `agent_end` - no usable credential is the common case.
-		// Treating that as terminal is what stops a session from hanging forever
-		// and leaving a review's merge gate pending with nothing posted.
+		// A prompt is acked before the agent starts and can fail later with the same
+		// id and no `agent_end`; without this the session hangs forever.
 		if (frame.type === "response" && frame.success === false) {
 			if (PROMPT_COMMANDS[frame.command]) {
 				this.failRun(frame.error ?? `omp rejected ${frame.command}`);
@@ -348,12 +329,7 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 		for (const message of this.mapper.map(frame)) this.pushMessage(message);
 	}
 
-	/**
-	 * The result message carries the session's cost and token totals, and omp
-	 * only reports those on request, so the stats round-trip has to complete
-	 * before the terminal `agent_end` is mapped. A failed or slow stats call
-	 * degrades to zeroed accounting rather than withholding the result.
-	 */
+	/** Fetch cost/token totals before mapping the terminal agent_end; failure degrades to zeros. */
 	private async finishRun(frame: OmpFrame): Promise<void> {
 		try {
 			const response = await this.process?.command(
@@ -373,10 +349,7 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 		this.settleRun();
 	}
 
-	/**
-	 * Headless sessions have no UI, and an unanswered dialog stalls the tool call
-	 * that raised it, so blocking methods are cancelled and the rest ignored.
-	 */
+	/** No UI here, and an unanswered dialog stalls its tool call, so blocking methods are cancelled. */
 	private answerUIRequest(frame: OmpExtensionUIRequestFrame): void {
 		if (!BLOCKING_UI_METHODS[frame.method]) return;
 		this.process?.notify({
