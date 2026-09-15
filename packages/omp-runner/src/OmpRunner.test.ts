@@ -23,7 +23,9 @@ class FakeProcess extends EventEmitter implements OmpRpcProcessLike {
 		return { protocolVersion: 1, type: "ready" };
 	}
 
-	notify(): void {}
+	notify(): void {
+		if (!this.running) throw new Error("omp process is not running");
+	}
 
 	async command(frame: Record<string, unknown>): Promise<OmpResponseFrame> {
 		if (frame.type === "get_state") {
@@ -90,6 +92,49 @@ describe("OmpRunner", () => {
 		expect(errors.join(" ")).toContain(OMP_ABORT_MARKER);
 		expect(errors.join(" ")).toContain("No API key found");
 		expect(runner.isRunning()).toBe(false);
+	});
+
+	it("still produces a result when omp exits without finishing the run", async () => {
+		// A clean exit mid-run (stdin closed, child killed) used to settle with no
+		// result at all, which strands a review's merge gate exactly like a hang.
+		const fake = new FakeProcess({
+			command: "prompt",
+			success: true,
+			type: "response",
+		});
+		const runner = runnerWith(fake);
+		const started = runner.start("say hi");
+		queueMicrotask(() =>
+			fake.emit("exit", { code: 0, signal: null, stderr: "" }),
+		);
+		await started;
+
+		const result = runner.getMessages().find((m) => m.type === "result");
+		expect(result?.type).toBe("result");
+		if (result?.type !== "result") return;
+		expect(result.is_error).toBe(true);
+		const errors = "errors" in result ? result.errors : [];
+		expect(errors.join(" ")).toContain(OMP_ABORT_MARKER);
+		expect(errors.join(" ")).toContain("exited before the run completed");
+	});
+
+	it("tolerates stop() and interrupt() after the child is gone", async () => {
+		const fake = new FakeProcess({
+			command: "prompt",
+			success: true,
+			type: "response",
+		});
+		const runner = runnerWith(fake);
+		const started = runner.start("say hi");
+		queueMicrotask(() =>
+			fake.emit("exit", { code: 0, signal: null, stderr: "" }),
+		);
+		await started;
+		fake.running = false;
+
+		// Cyrus calls both on cleanup paths that run after omp has exited.
+		expect(() => runner.stop()).not.toThrow();
+		await expect(runner.interrupt()).resolves.toBeUndefined();
 	});
 
 	it("reports a model fallback so the switch is visible in the timeline", async () => {

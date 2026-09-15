@@ -7,6 +7,7 @@ import type {
 	CyrusAgentSession,
 	IAgentRunner,
 	ILogger,
+	OmpConfig,
 	OpenCodeConfigOverrides,
 	RepositoryConfig,
 	RunnerType,
@@ -116,6 +117,7 @@ export interface ChatSessionHandlerDeps {
 		repositoryPaths: string[];
 	}) => Promise<{ plugins?: SdkPluginConfig[]; skills?: string[] | "all" }>;
 	/** Read live global OpenCode config overrides at session-build time */
+	getOmpConfig?: () => OmpConfig | undefined;
 	getOpenCodeGlobalConfig?: () => OpenCodeConfigOverrides["config"] | undefined;
 	/** Read live global OpenCode CLI state scope at session-build time */
 	getOpenCodeGlobalStateScope?: () =>
@@ -793,6 +795,7 @@ export class ChatSessionHandler<TEvent> {
 			strictMcpConfig: this.deps.getStrictMcpConfig?.(),
 			plugins: skillsConfig.plugins,
 			skills: skillsConfig.skills,
+			omp: this.deps.getOmpConfig?.(),
 			opencodeGlobalConfig: this.deps.getOpenCodeGlobalConfig?.(),
 			opencodeGlobalStateScope: this.deps.getOpenCodeGlobalStateScope?.(),
 			logger: sessionLogger,

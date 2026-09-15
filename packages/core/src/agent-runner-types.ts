@@ -11,7 +11,11 @@ import type {
 // Import the AskUserQuestionInput type from the SDK's tool input types
 // This ensures we use the SDK's official type definitions
 import type { AskUserQuestionInput as SDKAskUserQuestionInput } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
-import type { OpenCodeStateScope, RunnerType } from "./config-schemas.js";
+import type {
+	OmpConfig,
+	OpenCodeStateScope,
+	RunnerType,
+} from "./config-schemas.js";
 import type { ILogger } from "./logging/ILogger.js";
 
 // ============================================================================
@@ -486,6 +490,8 @@ export interface AgentRunnerConfig {
 	 * Defaults to true for Claude sessions.
 	 */
 	strictMcpConfig?: boolean;
+	/** omp runner overrides from Cyrus config (binary, approval tier, subagent forwarding) */
+	omp?: OmpConfig;
 	/** Global OpenCode runtime config overrides from Cyrus config */
 	opencodeGlobalConfig?: JsonObject;
 	/** Repository OpenCode runtime config overrides from Cyrus config */
