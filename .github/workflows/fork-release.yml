@@ -1,0 +1,126 @@
+name: Fork Release
+
+# Publishes a consumable fork release:
+#   1. rebuilds the dist branch (source + compiled JS) that container builds clone
+#   2. tags that commit `v<upstream-version>-fork.<n>`
+#   3. cuts a GitHub Release so the tag is a Renovate-visible datasource
+#
+# The tag carries the upstream version it was rebased onto, so a consumer pin
+# states the upstream baseline without anyone having to read a commit log.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Fork source branch to release
+        required: true
+        default: fix/stale-session-recovery
+        type: string
+      dry_run:
+        description: Build and compute the tag without pushing or releasing
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, tag, publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # Full history + tags: the next fork number is derived from existing tags,
+      # and a shallow clone reports none, which would reuse `.1` forever.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Enable pnpm
+        run: corepack enable pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(jq -r .version apps/cli/package.json)"
+          if [ -z "$base" ] || [ "$base" = "null" ]; then
+            echo "could not read the upstream version from apps/cli/package.json" >&2
+            exit 1
+          fi
+          next=1
+          while git rev-parse -q --verify "refs/tags/v${base}-fork.${next}" >/dev/null; do
+            next=$((next + 1))
+          done
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${base}-fork.${next}" >> "$GITHUB_OUTPUT"
+          echo "Releasing v${base}-fork.${next} from ${{ inputs.source_ref }}"
+
+      - name: Rebuild the dist branch
+        id: dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${{ inputs.source_ref }}-dist"
+          for d in apps/cli/dist apps/f1/dist packages/*/dist; do
+            [ -d "$d" ] && git add -f "$d"
+          done
+          # --no-verify: the repo's formatter rejects compiled output, which is
+          # the whole point of this branch.
+          git commit -q --no-verify -m "build: add compiled dist files for Docker consumption"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Push branch, tag and release
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          BASE: ${{ steps.tag.outputs.base }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          DIST_SHA: ${{ steps.dist.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git push --force origin "HEAD:refs/heads/${SOURCE_REF}-dist"
+          git tag "$TAG" "$DIST_SHA"
+          git push origin "refs/tags/${TAG}"
+          notes="$(mktemp)"
+          {
+            printf 'Fork release built from `%s`, rebased onto upstream `v%s`.\n\n' "$SOURCE_REF" "$BASE"
+            printf 'Consumers pin this tag; the dist commit is `%s`.\n\n' "$DIST_SHA"
+            printf 'Patches carried on top of upstream are listed in FORK.md on `%s`.\n' "$SOURCE_REF"
+          } > "$notes"
+          gh release create "$TAG" --title "$TAG" --notes-file "$notes"
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "### ${{ steps.tag.outputs.tag }}"
+            echo ""
+            echo "- upstream base: \`v${{ steps.tag.outputs.base }}\`"
+            echo "- source: \`${{ inputs.source_ref }}\`"
+            echo "- dist commit: \`${{ steps.dist.outputs.sha }}\`"
+            echo "- dry run: \`${{ inputs.dry_run }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

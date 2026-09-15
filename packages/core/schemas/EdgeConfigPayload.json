@@ -586,9 +586,35 @@
 			},
 			"additionalProperties": false
 		},
+		"ompDefaultModel": {
+			"type": "string"
+		},
+		"ompDefaultFallbackModel": {
+			"type": "string"
+		},
+		"omp": {
+			"type": "object",
+			"properties": {
+				"ompPath": {
+					"type": "string"
+				},
+				"approvalMode": {
+					"type": "string",
+					"enum": ["always-ask", "write", "yolo"]
+				},
+				"subagentSubscription": {
+					"type": "string",
+					"enum": ["off", "progress", "events"]
+				},
+				"includeThinking": {
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
 		"defaultRunner": {
 			"type": "string",
-			"enum": ["claude", "gemini", "codex", "cursor", "opencode"]
+			"enum": ["claude", "gemini", "codex", "cursor", "opencode", "omp"]
 		},
 		"defaultModel": {
 			"type": "string"
