@@ -135,7 +135,7 @@ describe("RunnerSelectionService", () => {
 	it("keeps an omp default on a bare alias selector instead of routing to Claude", () => {
 		const service = new RunnerSelectionService({
 			defaultRunner: "omp",
-			ompDefaultFallbackModel: "openai-codex/gpt-6-astra",
+			ompDefaultFallbackModel: "openai-codex/gpt-5.6-sol",
 			ompDefaultModel: "opus",
 		} as EdgeWorkerConfig);
 
@@ -146,13 +146,13 @@ describe("RunnerSelectionService", () => {
 		// omp fuzzy-matches `sonnet` to claude-sonnet-4-0, so the alias is pinned.
 		expect(review.modelOverride).toBe("anthropic/claude-sonnet-5");
 		// The single configured fallback, not a per-alias ladder.
-		expect(review.fallbackModelOverride).toBe("openai-codex/gpt-6-astra");
+		expect(review.fallbackModelOverride).toBe("openai-codex/gpt-5.6-sol");
 	});
 
 	it("uses the writer alias and its same-provider fallback for an omp fix session", () => {
 		const service = new RunnerSelectionService({
 			defaultRunner: "omp",
-			ompDefaultFallbackModel: "openai-codex/gpt-6-astra",
+			ompDefaultFallbackModel: "openai-codex/gpt-5.6-sol",
 			ompDefaultModel: "opus",
 		} as EdgeWorkerConfig);
 
@@ -160,13 +160,13 @@ describe("RunnerSelectionService", () => {
 
 		expect(fix.runnerType).toBe("omp");
 		expect(fix.modelOverride).toBe("anthropic/claude-opus-5");
-		expect(fix.fallbackModelOverride).toBe("openai-codex/gpt-6-astra");
+		expect(fix.fallbackModelOverride).toBe("openai-codex/gpt-5.6-sol");
 	});
 
 	it("falls back across providers only for a non-alias omp model", () => {
 		const service = new RunnerSelectionService({
 			defaultRunner: "omp",
-			ompDefaultFallbackModel: "openai-codex/gpt-6-astra",
+			ompDefaultFallbackModel: "openai-codex/gpt-5.6-sol",
 			ompDefaultModel: "opus",
 		} as EdgeWorkerConfig);
 
@@ -177,7 +177,7 @@ describe("RunnerSelectionService", () => {
 
 		expect(selection.runnerType).toBe("omp");
 		expect(selection.modelOverride).toBe("anthropic/claude-mythos-5");
-		expect(selection.fallbackModelOverride).toBe("openai-codex/gpt-6-astra");
+		expect(selection.fallbackModelOverride).toBe("openai-codex/gpt-5.6-sol");
 	});
 
 	it("still honours an explicit agent selector against an omp default", () => {
