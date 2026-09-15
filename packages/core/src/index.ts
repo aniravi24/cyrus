@@ -79,6 +79,7 @@ export type {
 	LinearWorkspaceConfig,
 	NetworkPolicy,
 	OAuthCallbackHandler,
+	OmpConfig,
 	OpenCodeConfigOverrides,
 	OpenCodeStateScope,
 	RepoSetupHookEvent,

@@ -17,6 +17,8 @@ export {
 	migrateEdgeConfig,
 	type NetworkPolicy,
 	NetworkPolicySchema,
+	type OmpConfig,
+	OmpConfigSchema,
 	type OpenCodeConfigOverrides,
 	OpenCodeConfigSchema,
 	type OpenCodeStateScope,

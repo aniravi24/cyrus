@@ -60,7 +60,9 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 	private streaming = false;
 	private streamClosed = false;
 	private finalized = false;
+	private emittedResult = false;
 	private runSettled: (() => void) | null = null;
+	private settled: Promise<void> = Promise.resolve();
 
 	constructor(private readonly config: OmpRunnerConfig) {
 		super();
@@ -69,18 +71,12 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 
 	async start(prompt: string): Promise<OmpSessionInfo> {
 		const info = await this.launch();
-		// Arm the settle latch before prompting: a prompt that fails immediately
-		// settles the run inside `prompt()`, and a latch created afterwards would
-		// miss it and wait forever.
-		const settled = new Promise<void>((resolve) => {
-			this.runSettled = resolve;
-		});
 		try {
 			await this.prompt(prompt);
 		} catch (error) {
 			this.failRun(error instanceof Error ? error.message : String(error));
 		}
-		await settled;
+		await this.settled;
 		this.finalize();
 		this.process?.stop();
 		return info;
@@ -112,13 +108,18 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 	}
 
 	stop(): void {
-		this.process?.notify({ type: "abort" });
+		// Cleanup paths in Cyrus routinely call stop() after omp already exited,
+		// so nothing here may depend on a live child.
+		if (this.process?.isRunning()) this.process.notify({ type: "abort" });
 		this.process?.stop();
 		this.finalize();
 	}
 
 	async interrupt(): Promise<void> {
-		await this.process?.command({ type: "abort" });
+		// Cyrus branches on isWarm() and can reach here after the child died; an
+		// interrupt with nothing to interrupt is a no-op, not an error.
+		if (!this.process?.isRunning()) return;
+		await this.process.command({ type: "abort" });
 	}
 
 	isWarm(): boolean {
@@ -143,7 +144,8 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 
 	private createMapper(): OmpEventMapper {
 		return new OmpEventMapper({
-			includeThinking: this.config.includeThinking,
+			includeThinking:
+				this.config.omp?.includeThinking ?? this.config.includeThinking,
 			mcpServers: Object.keys(this.config.mcpConfig ?? {}),
 			model: this.config.model ?? DEFAULT_MODEL_DISPLAY,
 			tools: this.config.allowedTools ?? [],
@@ -157,12 +159,17 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 		this.mapper.resetTimer();
 		this.messages = [];
 		this.finalized = false;
+		this.emittedResult = false;
+		this.settled = new Promise<void>((resolve) => {
+			this.runSettled = resolve;
+		});
+		this.stageAgents();
 
 		const options = {
 			args: this.buildArgs(),
 			cwd: this.config.workingDirectory ?? cwd(),
 			env: { ...process.env, ...this.config.env },
-			ompPath: this.config.ompPath ?? "omp",
+			ompPath: this.config.omp?.ompPath ?? this.config.ompPath ?? "omp",
 		};
 		const proc = this.config.processFactory
 			? this.config.processFactory(options)
@@ -173,10 +180,14 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 		proc.on(
 			"exit",
 			({ code, stderr }: { code: number | null; stderr: string }) => {
-				if (!this.finalized && code !== 0) {
+				if (!this.finalized && !this.emittedResult) {
+					const detail =
+						code === 0
+							? "omp exited before the run completed"
+							: `omp exited with code ${String(code)}`;
 					this.pushMessage(
 						this.mapper.errorResult(
-							`omp exited with code ${String(code)}: ${stderr.slice(-500)}`,
+							`${OMP_ABORT_MARKER} ${detail}: ${stderr.slice(-500)}`,
 						),
 					);
 				}
@@ -185,16 +196,27 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 			},
 		);
 
-		await proc.start();
-		proc.notify({
-			level: this.config.subagentSubscription ?? "progress",
-			type: "set_subagent_subscription",
-		});
+		// Anything that throws past this point leaves a spawned child with nobody
+		// holding it, so startup failures tear it down before rethrowing.
+		try {
+			await proc.start();
+			proc.notify({
+				level:
+					this.config.omp?.subagentSubscription ??
+					this.config.subagentSubscription ??
+					"progress",
+				type: "set_subagent_subscription",
+			});
 
-		const state = await proc.command({ type: "get_state" });
-		const sessionId =
-			typeof state.data?.sessionId === "string" ? state.data.sessionId : "";
-		this.mapper.setSessionId(sessionId);
+			const state = await proc.command({ type: "get_state" });
+			const sessionId =
+				typeof state.data?.sessionId === "string" ? state.data.sessionId : "";
+			this.mapper.setSessionId(sessionId);
+		} catch (error) {
+			proc.stop();
+			this.process = null;
+			throw error;
+		}
 
 		this.sessionInfo = {
 			isRunning: true,
@@ -224,7 +246,10 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 	private buildArgs(): string[] {
 		const args = ["--mode", "rpc"];
 		if (this.config.model) args.push("--model", this.config.model);
-		args.push("--approval-mode", this.config.approvalMode ?? "yolo");
+		args.push(
+			"--approval-mode",
+			this.config.omp?.approvalMode ?? this.config.approvalMode ?? "yolo",
+		);
 		if (
 			this.config.resumeSessionId &&
 			(this.config.runnerType ?? "omp") === "omp"
@@ -233,7 +258,6 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 		}
 		const overlay = this.writeSkillOverlay();
 		if (overlay) args.push("--config", overlay);
-		this.stageAgents();
 		for (const extra of this.config.configOverlays ?? []) {
 			args.push("--config", extra);
 		}
@@ -388,6 +412,7 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 	}
 
 	private pushMessage(message: SDKMessage): void {
+		if (message.type === "result") this.emittedResult = true;
 		this.messages.push(message);
 		this.emit("message", message);
 		void this.config.onMessage?.(message);

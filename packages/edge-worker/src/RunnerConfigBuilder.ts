@@ -14,6 +14,7 @@ import type {
 	AgentRunnerConfig,
 	CyrusAgentSession,
 	ILogger,
+	OmpConfig,
 	OnAskUserQuestion,
 	OpenCodeConfigOverrides,
 	RepositoryConfig,
@@ -109,6 +110,7 @@ export interface ChatRunnerConfigInput {
 	 */
 	skills?: string[] | "all";
 	/** Global OpenCode runtime config overrides from Cyrus config */
+	omp?: OmpConfig;
 	opencodeGlobalConfig?: OpenCodeConfigOverrides["config"];
 	/** Global OpenCode CLI state scope from Cyrus config */
 	opencodeGlobalStateScope?: OpenCodeConfigOverrides["stateScope"];
@@ -162,6 +164,7 @@ export interface IssueRunnerConfigInput {
 	/** Plugins to load for the session (provides skills, hooks, etc.) */
 	plugins?: SdkPluginConfig[];
 	/** Global OpenCode runtime config overrides from Cyrus config */
+	omp?: OmpConfig;
 	opencodeGlobalConfig?: OpenCodeConfigOverrides["config"];
 	/** Global OpenCode CLI state scope from Cyrus config */
 	opencodeGlobalStateScope?: OpenCodeConfigOverrides["stateScope"];
@@ -314,6 +317,7 @@ export class RunnerConfigBuilder {
 			...(input.plugins?.length ? { plugins: input.plugins } : {}),
 			...(input.skills !== undefined ? { skills: input.skills } : {}),
 			...(runnerType === "opencode" && {
+				omp: input.omp,
 				opencodeGlobalConfig: input.opencodeGlobalConfig,
 				opencodeRepositoryConfig: input.repository?.opencode?.config,
 				opencodeStateScope:
@@ -493,6 +497,7 @@ export class RunnerConfigBuilder {
 					),
 				}),
 			...(runnerType === "opencode" && {
+				omp: input.omp,
 				opencodeGlobalConfig: input.opencodeGlobalConfig,
 				opencodeRepositoryConfig: input.repository.opencode?.config,
 				opencodeStateScope:

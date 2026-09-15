@@ -6916,6 +6916,7 @@ ${input.userComment}
 			cyrusHome: this.cyrusHome,
 			logger: log,
 			plugins,
+			omp: this.config.omp,
 			opencodeGlobalConfig: this.config.opencode?.config,
 			opencodeGlobalStateScope: this.config.opencode?.stateScope,
 			skills: allowedSkillNames,

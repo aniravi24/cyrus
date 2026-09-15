@@ -116,8 +116,14 @@ export class OmpRpcProcess extends EventEmitter {
 		return ready;
 	}
 
-	/** Fire-and-forget frame (no id correlation). */
+	/**
+	 * Fire-and-forget frame (no id correlation). Dropped when the child is gone:
+	 * callers use this on teardown paths that legitimately run after omp exited,
+	 * and throwing there would break the caller's cleanup rather than report
+	 * anything actionable.
+	 */
 	notify(frame: Record<string, unknown>): void {
+		if (!this.child || this.exited) return;
 		this.write(frame);
 	}
 
