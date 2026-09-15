@@ -23,6 +23,40 @@ export interface OmpRunnerConfig extends AgentRunnerConfig {
 	configOverlays?: string[];
 	/** Emit thinking blocks as activity messages. */
 	includeThinking?: boolean;
+	/**
+	 * Test seam: supplies the RPC process. Production leaves it unset and the
+	 * runner spawns `omp` itself.
+	 */
+	processFactory?: (options: OmpRpcProcessOptions) => OmpRpcProcessLike;
+}
+
+/** The slice of the RPC process the runner drives. */
+export interface OmpRpcProcessLike {
+	start(readyTimeoutMs?: number): Promise<unknown>;
+	notify(frame: Record<string, unknown>): void;
+	command(
+		frame: Record<string, unknown>,
+		timeoutMs?: number,
+	): Promise<OmpResponseFrame>;
+	stop(): void;
+	isRunning(): boolean;
+	on(event: "frame", listener: (frame: OmpFrame) => void): unknown;
+	on(event: "processError", listener: (error: Error) => void): unknown;
+	on(
+		event: "exit",
+		listener: (info: {
+			code: number | null;
+			signal: NodeJS.Signals | null;
+			stderr: string;
+		}) => void,
+	): unknown;
+}
+
+export interface OmpRpcProcessOptions {
+	ompPath: string;
+	args: string[];
+	cwd: string;
+	env: Record<string, string | undefined>;
 }
 
 /** `get_session_stats` payload: omp's own accounting for the live session. */
@@ -80,6 +114,8 @@ export type OmpFrame =
 	| OmpMessageEndFrame
 	| OmpAgentEndFrame
 	| OmpSubagentFrame
+	| OmpRetryFallbackFrame
+	| OmpNoticeFrame
 	| OmpExtensionUIRequestFrame
 	| OmpChunkFrame;
 
@@ -147,6 +183,19 @@ export interface OmpSubagentFrame {
 	agent?: string;
 	status?: string;
 	phase?: string;
+	message?: string;
+}
+
+/** omp switched models because the requested one was unavailable or exhausted. */
+export interface OmpRetryFallbackFrame {
+	type: "retry_fallback_applied";
+	from?: string;
+	to?: string;
+	role?: string;
+}
+
+export interface OmpNoticeFrame {
+	type: "notice";
 	message?: string;
 }
 

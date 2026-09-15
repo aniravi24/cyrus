@@ -130,6 +130,19 @@ export class OmpEventMapper {
 			case "subagent_lifecycle":
 			case "subagent_progress":
 				return this.mapSubagent(frame);
+			case "retry_fallback_applied":
+				return [
+					this.assistant([
+						{
+							type: "text",
+							text: `Model fallback: \`${frame.from}\` is unavailable, continuing on \`${frame.to}\`.`,
+						},
+					]),
+				];
+			case "notice":
+				return frame.message
+					? [this.assistant([{ type: "text", text: frame.message }])]
+					: [];
 			case "agent_end":
 				return this.mapAgentEnd(frame);
 			default:

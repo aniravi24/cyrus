@@ -9,12 +9,28 @@ import { OmpRpcProcess } from "./OmpRpcProcess.js";
 import type {
 	OmpExtensionUIRequestFrame,
 	OmpFrame,
+	OmpRpcProcessLike,
 	OmpRunnerConfig,
 	OmpSessionInfo,
 	OmpSessionStats,
 } from "./types.js";
 
 const DEFAULT_MODEL_DISPLAY = "omp default model";
+
+/**
+ * Stable marker on every aborted-session result. Downstream automation keys off
+ * it to tell "the agent could not run at all" apart from "the agent reported a
+ * problem", without matching on provider error prose that changes upstream.
+ */
+export const OMP_ABORT_MARKER = "[omp:aborted]";
+
+/** Commands whose failure ends the run rather than just the command. */
+const PROMPT_COMMANDS: Record<string, true> = {
+	abort_and_prompt: true,
+	follow_up: true,
+	prompt: true,
+	steer: true,
+};
 
 /** UI methods that block a tool call until the host answers. */
 const BLOCKING_UI_METHODS: Record<string, true> = {
@@ -35,7 +51,7 @@ const BLOCKING_UI_METHODS: Record<string, true> = {
 export class OmpRunner extends EventEmitter implements IAgentRunner {
 	readonly supportsStreamingInput = true;
 
-	private process: OmpRpcProcess | null = null;
+	private process: OmpRpcProcessLike | null = null;
 	private mapper: OmpEventMapper;
 	private formatter = new OmpMessageFormatter();
 	private messages: SDKMessage[] = [];
@@ -52,10 +68,18 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 
 	async start(prompt: string): Promise<OmpSessionInfo> {
 		const info = await this.launch();
-		await this.prompt(prompt);
-		await new Promise<void>((resolve) => {
+		// Arm the settle latch before prompting: a prompt that fails immediately
+		// settles the run inside `prompt()`, and a latch created afterwards would
+		// miss it and wait forever.
+		const settled = new Promise<void>((resolve) => {
 			this.runSettled = resolve;
 		});
+		try {
+			await this.prompt(prompt);
+		} catch (error) {
+			this.failRun(error instanceof Error ? error.message : String(error));
+		}
+		await settled;
 		this.finalize();
 		this.process?.stop();
 		return info;
@@ -133,12 +157,15 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 		this.messages = [];
 		this.finalized = false;
 
-		const proc = new OmpRpcProcess({
+		const options = {
 			args: this.buildArgs(),
 			cwd: this.config.workingDirectory ?? cwd(),
 			env: { ...process.env, ...this.config.env },
 			ompPath: this.config.ompPath ?? "omp",
-		});
+		};
+		const proc = this.config.processFactory
+			? this.config.processFactory(options)
+			: new OmpRpcProcess(options);
 		this.process = proc;
 		proc.on("frame", (frame: OmpFrame) => this.handleFrame(frame));
 		proc.on("processError", (error: Error) => this.emitError(error));
@@ -245,6 +272,17 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 			return;
 		}
 
+		// `prompt` is acknowledged before the agent starts and can fail later with
+		// the same id and no `agent_end` - no usable credential is the common case.
+		// Treating that as terminal is what stops a session from hanging forever
+		// and leaving a review's merge gate pending with nothing posted.
+		if (frame.type === "response" && frame.success === false) {
+			if (PROMPT_COMMANDS[frame.command]) {
+				this.failRun(frame.error ?? `omp rejected ${frame.command}`);
+			}
+			return;
+		}
+
 		// `isTerminal: false` means omp scheduled more work, so the run has not
 		// settled yet and Cyrus must not treat it as completion.
 		if (frame.type === "agent_end" && frame.isTerminal !== false) {
@@ -291,6 +329,14 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 			id: frame.id,
 			type: "extension_ui_response",
 		});
+	}
+
+	/** Emit a terminal error result, then settle and finalize the run. */
+	private failRun(reason: string): void {
+		if (this.finalized) return;
+		this.pushMessage(this.mapper.errorResult(`${OMP_ABORT_MARKER} ${reason}`));
+		this.settleRun();
+		this.finalize();
 	}
 
 	private settleRun(): void {
