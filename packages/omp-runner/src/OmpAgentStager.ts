@@ -18,6 +18,10 @@ import { join } from "node:path";
  * (`sonnet` lands on claude-sonnet-4-0), so each alias is pinned. The second
  * entry is a cross-provider fallback: omp tries the list in order, so an
  * exhausted Anthropic account moves the pass to Codex instead of failing it.
+ *
+ * This is the default mapping only. A definition needing a different model - a
+ * frontier model for an architectural pass, say - sets `omp-model` and its
+ * selector list is taken verbatim.
  */
 const OMP_FALLBACK_MODEL = "openai-codex/gpt-5.6-sol";
 
@@ -92,16 +96,29 @@ export function stageOmpAgents(
 
 			const lines = ["---", `name: ${parsed.fields.name}`];
 			lines.push(`description: ${parsed.fields.description}`);
-			const model = parsed.fields.model;
-			if (model)
-				lines.push(`model: ${MODEL_LISTS[model.toLowerCase()] ?? model}`);
+			// `omp-model` lets a definition state its own omp selector list, which
+			// is how one pass opts into a model the default mapping deliberately
+			// does not reach for. Claude ignores the unknown key.
+			const override = parsed.fields["omp-model"];
+			const model = override ?? parsed.fields.model;
+			const selector = override
+				? override
+				: model
+					? (MODEL_LISTS[model.toLowerCase()] ?? model)
+					: undefined;
+			if (selector) lines.push(`model: ${selector}`);
 			const effort = parsed.fields["thinking-level"] ?? parsed.fields.effort;
 			if (effort) lines.push(`thinking-level: ${effort}`);
 			for (const [key, value] of Object.entries(parsed.fields)) {
 				if (
-					["description", "effort", "model", "name", "thinking-level"].includes(
-						key,
-					)
+					[
+						"description",
+						"effort",
+						"model",
+						"name",
+						"omp-model",
+						"thinking-level",
+					].includes(key)
 				) {
 					continue;
 				}
