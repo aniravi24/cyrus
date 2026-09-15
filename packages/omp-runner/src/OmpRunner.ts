@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { cwd } from "node:process";
 import type { IAgentRunner, IMessageFormatter, SDKMessage } from "cyrus-core";
 import { OmpMessageFormatter } from "./formatter.js";
-import { stageOmpAgents } from "./OmpAgentStager.js";
+import { ompAgentsDir, stageOmpAgents } from "./OmpAgentStager.js";
 import { OmpEventMapper } from "./OmpEventMapper.js";
+import { resolveMcpPolicy } from "./OmpMcpPolicy.js";
 import { OmpRpcProcess } from "./OmpRpcProcess.js";
 import type {
 	OmpExtensionUIRequestFrame,
@@ -249,8 +250,7 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 		) {
 			args.push("--resume", this.config.resumeSessionId);
 		}
-		const overlay = this.writeSkillOverlay();
-		if (overlay) args.push("--config", overlay);
+		args.push("--config", this.writeSessionOverlay());
 		for (const extra of this.config.configOverlays ?? []) {
 			args.push("--config", extra);
 		}
@@ -285,9 +285,30 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 			.filter((path): path is string => path !== null);
 	}
 
-	private writeSkillOverlay(): string | null {
+	/**
+	 * One overlay carrying the session's skill roots and MCP tool denials. Always
+	 * written: without it omp reaches every MCP server the repo defines, which is
+	 * a wider surface than the allowlist the Claude runner enforces.
+	 */
+	private writeSessionOverlay(): string {
 		const roots = this.pluginPaths().map((path) => join(path, "skills"));
-		if (roots.length === 0) return null;
+		const policy = resolveMcpPolicy(
+			this.config.allowedTools,
+			this.config.workingDirectory ?? cwd(),
+		);
+		this.writeMcpDenylist(policy.disabledServers);
+
+		const lines: string[] = [];
+		if (roots.length > 0) {
+			lines.push("skills:", "  customDirectories:");
+			for (const root of roots) lines.push(`    - ${JSON.stringify(root)}`);
+		}
+		if (policy.deniedTools.length > 0) {
+			lines.push("tools:", "  approval:");
+			for (const tool of policy.deniedTools) {
+				lines.push(`    ${JSON.stringify(tool)}: deny`);
+			}
+		}
 
 		const dir = join(this.config.cyrusHome, "omp-overlays");
 		mkdirSync(dir, { recursive: true });
@@ -295,11 +316,20 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 			dir,
 			`${(this.config.workspaceName ?? "session").replace(/[^\w.-]/g, "_")}.yml`,
 		);
-		const body = ["skills:", "  customDirectories:"]
-			.concat(roots.map((root) => `    - ${JSON.stringify(root)}`))
-			.join("\n");
-		writeFileSync(file, `${body}\n`);
+		writeFileSync(file, `${lines.join("\n")}\n`);
 		return file;
+	}
+
+	/**
+	 * `disabledServers` is omp's highest-precedence denylist and is read from the
+	 * user config dir, so it is written next to the staged agents rather than
+	 * into the repository checkout.
+	 */
+	private writeMcpDenylist(disabledServers: ReadonlyArray<string>): void {
+		const agentsDir = ompAgentsDir({ ...process.env, ...this.config.env });
+		const file = join(agentsDir, "..", "mcp.json");
+		mkdirSync(join(agentsDir, ".."), { recursive: true });
+		writeFileSync(file, `${JSON.stringify({ disabledServers }, null, "\t")}\n`);
 	}
 
 	private handleFrame(frame: OmpFrame): void {
