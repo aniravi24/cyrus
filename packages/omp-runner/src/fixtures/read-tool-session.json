@@ -1,0 +1,280 @@
+[
+	{
+		"type": "ready",
+		"protocolVersion": 1,
+		"supportedProtocolVersions": [1, 2],
+		"maxFrameBytes": 1048576,
+		"maxReassembledFrameBytes": 67108864
+	},
+	{
+		"type": "message_end",
+		"message": {
+			"role": "user",
+			"content": [
+				{
+					"type": "text",
+					"text": "Read target.txt and tell me which line has a TODO. Use the read tool."
+				}
+			],
+			"attribution": "user",
+			"timestamp": 1789466001501
+		}
+	},
+	{
+		"type": "message_end",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "The user wants me to read a file called \"target.txt\" and find which line has a TODO. They explicitly want me to use the read tool.\n\nLet me read the file first.",
+					"thinkingSignature": "<signature>"
+				},
+				{
+					"type": "text",
+					"text": "I'll read the target.txt file to find the TODO."
+				},
+				{
+					"type": "toolCall",
+					"id": "toolu_018zbpJmhbJM7jgYSCvN6JAz",
+					"name": "read",
+					"arguments": {
+						"path": "target.txt",
+						"i": "Reading target.txt for TODO"
+					},
+					"intent": "Reading target.txt for TODO"
+				}
+			],
+			"api": "anthropic-messages",
+			"provider": "anthropic",
+			"model": "claude-sonnet-4-5",
+			"usage": {
+				"input": 10,
+				"output": 137,
+				"cacheRead": 0,
+				"cacheWrite": 25228,
+				"totalTokens": 25375,
+				"cost": {
+					"input": 0.00003,
+					"output": 0.002055,
+					"cacheRead": 0,
+					"cacheWrite": 0.151368,
+					"total": 0.153453
+				},
+				"cttl": {
+					"ephemeral1h": 25228
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": 1789466001568,
+			"responseId": "msg_011Cf52BqfUkYo5KxzNcPQ9Q",
+			"upstreamModel": "claude-sonnet-4-5-20250929",
+			"duration": 3696.529914,
+			"ttft": 2069.067228,
+			"completedAt": 1789466005281
+		}
+	},
+	{
+		"type": "tool_execution_start",
+		"toolCallId": "toolu_018zbpJmhbJM7jgYSCvN6JAz",
+		"toolName": "read",
+		"args": {
+			"path": "target.txt"
+		},
+		"intent": "Reading target.txt for TODO"
+	},
+	{
+		"type": "tool_execution_end",
+		"toolCallId": "toolu_018zbpJmhbJM7jgYSCvN6JAz",
+		"toolName": "read",
+		"result": {
+			"content": [
+				{
+					"type": "text",
+					"text": "[target.txt#99FD]\n1:alpha\n2:beta\n3:TODO: fix me"
+				}
+			]
+		},
+		"isError": false
+	},
+	{
+		"type": "message_end",
+		"message": {
+			"role": "toolResult",
+			"toolCallId": "toolu_018zbpJmhbJM7jgYSCvN6JAz",
+			"toolName": "read",
+			"content": [
+				{
+					"type": "text",
+					"text": "[target.txt#99FD]\n1:alpha\n2:beta\n3:TODO: fix me"
+				}
+			],
+			"isError": false,
+			"timestamp": 1789466005286
+		}
+	},
+	{
+		"type": "message_end",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "The file has been read and I can see that line 3 contains \"TODO: fix me\". That's the line with the TODO.",
+					"thinkingSignature": "<signature>"
+				},
+				{
+					"type": "text",
+					"text": "Line 3 has the TODO: \"TODO: fix me\""
+				}
+			],
+			"api": "anthropic-messages",
+			"provider": "anthropic",
+			"model": "claude-sonnet-4-5",
+			"usage": {
+				"input": 8,
+				"output": 54,
+				"cacheRead": 25228,
+				"cacheWrite": 181,
+				"totalTokens": 25471,
+				"cost": {
+					"input": 0.000024,
+					"output": 0.0008100000000000001,
+					"cacheRead": 0.007568399999999999,
+					"cacheWrite": 0.001086,
+					"total": 0.0094884
+				},
+				"cttl": {
+					"ephemeral1h": 181
+				}
+			},
+			"stopReason": "stop",
+			"timestamp": 1789466005292,
+			"responseId": "msg_011Cf52C7NYf3p57ExeX3Xjz",
+			"upstreamModel": "claude-sonnet-4-5-20250929",
+			"duration": 6172.776525,
+			"ttft": 5429.8199030000005,
+			"completedAt": 1789466011465
+		}
+	},
+	{
+		"type": "agent_end",
+		"messages": [
+			{
+				"role": "user",
+				"content": [
+					{
+						"type": "text",
+						"text": "Read target.txt and tell me which line has a TODO. Use the read tool."
+					}
+				],
+				"attribution": "user",
+				"timestamp": 1789466001501
+			},
+			{
+				"role": "assistant",
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "The user wants me to read a file called \"target.txt\" and find which line has a TODO. They explicitly want me to use the read tool.\n\nLet me read the file first.",
+						"thinkingSignature": "<signature>"
+					},
+					{
+						"type": "text",
+						"text": "I'll read the target.txt file to find the TODO."
+					},
+					{
+						"type": "toolCall",
+						"id": "toolu_018zbpJmhbJM7jgYSCvN6JAz",
+						"name": "read",
+						"arguments": {
+							"path": "target.txt",
+							"i": "Reading target.txt for TODO"
+						},
+						"intent": "Reading target.txt for TODO"
+					}
+				],
+				"api": "anthropic-messages",
+				"provider": "anthropic",
+				"model": "claude-sonnet-4-5",
+				"usage": {
+					"input": 10,
+					"output": 137,
+					"cacheRead": 0,
+					"cacheWrite": 25228,
+					"totalTokens": 25375,
+					"cost": {
+						"input": 0.00003,
+						"output": 0.002055,
+						"cacheRead": 0,
+						"cacheWrite": 0.151368,
+						"total": 0.153453
+					},
+					"cttl": {
+						"ephemeral1h": 25228
+					}
+				},
+				"stopReason": "toolUse",
+				"timestamp": 1789466001568,
+				"responseId": "msg_011Cf52BqfUkYo5KxzNcPQ9Q",
+				"upstreamModel": "claude-sonnet-4-5-20250929",
+				"duration": 3696.529914,
+				"ttft": 2069.067228
+			},
+			{
+				"role": "toolResult",
+				"toolCallId": "toolu_018zbpJmhbJM7jgYSCvN6JAz",
+				"toolName": "read",
+				"content": [
+					{
+						"type": "text",
+						"text": "[target.txt#99FD]\n1:alpha\n2:beta\n3:TODO: fix me"
+					}
+				],
+				"isError": false,
+				"timestamp": 1789466005286
+			},
+			{
+				"role": "assistant",
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "The file has been read and I can see that line 3 contains \"TODO: fix me\". That's the line with the TODO.",
+						"thinkingSignature": "<signature>"
+					},
+					{
+						"type": "text",
+						"text": "Line 3 has the TODO: \"TODO: fix me\""
+					}
+				],
+				"api": "anthropic-messages",
+				"provider": "anthropic",
+				"model": "claude-sonnet-4-5",
+				"usage": {
+					"input": 8,
+					"output": 54,
+					"cacheRead": 25228,
+					"cacheWrite": 181,
+					"totalTokens": 25471,
+					"cost": {
+						"input": 0.000024,
+						"output": 0.0008100000000000001,
+						"cacheRead": 0.007568399999999999,
+						"cacheWrite": 0.001086,
+						"total": 0.0094884
+					},
+					"cttl": {
+						"ephemeral1h": 181
+					}
+				},
+				"stopReason": "stop",
+				"timestamp": 1789466005292,
+				"responseId": "msg_011Cf52C7NYf3p57ExeX3Xjz",
+				"upstreamModel": "claude-sonnet-4-5-20250929",
+				"duration": 6172.776525,
+				"ttft": 5429.8199030000005
+			}
+		],
+		"isTerminal": true
+	}
+]
