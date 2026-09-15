@@ -51,6 +51,8 @@ function blockText(
  * Maps omp RPC frames onto the Claude-SDK shapes the edge worker consumes.
  * Stateful only where one logical message spans frames (tool call start/end).
  */
+export const OMP_ABORT_MARKER = "[omp:aborted]";
+
 export class OmpEventMapper {
 	private sessionId: string = PENDING_SESSION;
 	private emittedInit = false;
@@ -135,9 +137,10 @@ export class OmpEventMapper {
 					]),
 				];
 			case "notice":
-				return frame.message
-					? [this.assistant([{ type: "text", text: frame.message }])]
-					: [];
+				// Infrastructure chatter (xd:// mounts, skill overrides), not model
+				// output. Cyrus builds its GitHub reply from the last assistant text
+				// block, so emitting one here posts a mount notice as the review.
+				return [];
 			case "agent_end":
 				return this.mapAgentEnd(frame);
 			default:
@@ -224,7 +227,14 @@ export class OmpEventMapper {
 			? blockText(trailing[trailing.length - 1]?.content, "text")
 			: "";
 		if (finalText) this.lastAssistantText = finalText;
-		return [this.result(this.lastAssistantText || "OMP session completed")];
+		// A terminal end with no model output anywhere in the run is not a success.
+		// Reporting one fabricates work that never happened and leaves an armed
+		// review gate pending with nothing to release it.
+		if (!this.lastAssistantText) {
+			const reason = `${OMP_ABORT_MARKER} the omp session produced no model output`;
+			return [this.abortNotice(reason), this.errorResult(reason)];
+		}
+		return [this.result(this.lastAssistantText)];
 	}
 
 	/** Assistant text for an aborted run; consumers read the reason from here. */

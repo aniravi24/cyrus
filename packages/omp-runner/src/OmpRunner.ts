@@ -5,7 +5,11 @@ import { cwd } from "node:process";
 import type { IAgentRunner, IMessageFormatter, SDKMessage } from "cyrus-core";
 import { OmpMessageFormatter } from "./formatter.js";
 import { ompAgentsDir, stageOmpAgents } from "./OmpAgentStager.js";
-import { OmpEventMapper } from "./OmpEventMapper.js";
+
+import { OMP_ABORT_MARKER, OmpEventMapper } from "./OmpEventMapper.js";
+
+export { OMP_ABORT_MARKER };
+
 import { resolveMcpPolicy } from "./OmpMcpPolicy.js";
 import { OmpRpcProcess } from "./OmpRpcProcess.js";
 import type {
@@ -20,7 +24,6 @@ import type {
 const DEFAULT_MODEL_DISPLAY = "omp default model";
 
 /** Marker on every aborted-session result; automation keys off it instead of provider error prose. */
-export const OMP_ABORT_MARKER = "[omp:aborted]";
 
 /** Commands whose failure ends the run rather than just the command. */
 const PROMPT_COMMANDS: Record<string, true> = {

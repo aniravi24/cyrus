@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { OmpEventMapper } from "./OmpEventMapper.js";
+import { OMP_ABORT_MARKER, OmpEventMapper } from "./OmpEventMapper.js";
 import type { OmpFrame, OmpMessage } from "./types.js";
 
 /** Frames captured from a real `omp --mode rpc` session that read a file. */
@@ -23,6 +23,48 @@ function mapAll(mapper: OmpEventMapper, frames: OmpFrame[]) {
 }
 
 describe("OmpEventMapper", () => {
+	// Both cases below shipped to staging and were observed on live PRs: a review
+	// posted omp's `xd://` mount notice as its verdict, and every session reported
+	// success after producing nothing, so no gate was ever released.
+	it("keeps infrastructure notices out of the assistant stream", () => {
+		const messages = mapAll(newMapper(), [
+			{
+				type: "notice",
+				message: "xd://: mounted mcp__sentry_find_projects",
+			} as unknown as OmpFrame,
+		]);
+
+		expect(messages).toHaveLength(0);
+	});
+
+	it("aborts instead of claiming success when a run produced no model output", () => {
+		const messages = mapAll(newMapper(), [
+			{
+				type: "notice",
+				message: "xd://: mounted mcp__sentry_find_projects",
+			} as unknown as OmpFrame,
+			{ type: "agent_end", isTerminal: true } as unknown as OmpFrame,
+		]);
+
+		const result = messages.find((message) => message.type === "result");
+		expect(result?.type === "result" && result.subtype).toBe(
+			"error_during_execution",
+		);
+		expect(result?.type === "result" && result.is_error).toBe(true);
+
+		const assistantText = messages
+			.filter((message) => message.type === "assistant")
+			.flatMap((message) =>
+				message.type === "assistant"
+					? message.message.content.map((block) =>
+							block.type === "text" ? block.text : "",
+						)
+					: [],
+			)
+			.join(" ");
+		expect(assistantText).toContain(OMP_ABORT_MARKER);
+	});
+
 	it("pairs a tool call with its result across the two frames that carry it", () => {
 		const messages = mapAll(newMapper(), FIXTURE);
 		const toolUse = messages.find(
@@ -69,9 +111,13 @@ describe("OmpEventMapper", () => {
 		expect(
 			mapper.map({ isTerminal: false, messages: [], type: "agent_end" }),
 		).toEqual([]);
+		// Terminal ends a run; whether that run boundary is a success or an abort
+		// is the empty-output test's business, so assert only the boundary here.
 		expect(
-			mapper.map({ isTerminal: true, messages: [], type: "agent_end" }),
-		).toHaveLength(1);
+			mapper
+				.map({ isTerminal: true, messages: [], type: "agent_end" })
+				.some((message) => message.type === "result"),
+		).toBe(true);
 	});
 
 	it("synthesizes a tool_use when only the end frame is seen after a resume", () => {
