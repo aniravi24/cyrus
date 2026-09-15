@@ -5,6 +5,7 @@ import type {
 	OmpFrame,
 	OmpReadyFrame,
 	OmpResponseFrame,
+	OmpRpcProcessOptions,
 } from "./types.js";
 
 const FORCE_KILL_DELAY_MS = 5_000;
@@ -25,13 +26,6 @@ function parseFrame(line: string): OmpFrame | null {
 	if (!("type" in value) || typeof value.type !== "string") return null;
 	const frame = value as OmpFrame;
 	return frame;
-}
-
-export interface OmpRpcProcessOptions {
-	ompPath: string;
-	args: string[];
-	cwd: string;
-	env: Record<string, string | undefined>;
 }
 
 interface ChunkAccumulator {
