@@ -19,11 +19,13 @@ import { join } from "node:path";
  * entry is a cross-provider fallback: omp tries the list in order, so an
  * exhausted Anthropic account moves the pass to Codex instead of failing it.
  */
+const OMP_FALLBACK_MODEL = "openai-codex/gpt-5.6-sol";
+
 const MODEL_LISTS: Record<string, string> = {
-	fable: "anthropic/claude-fable-5-1, openai-codex/gpt-5.6-sol",
-	haiku: "anthropic/claude-haiku-4-5, openai-codex/gpt-5.5",
-	opus: "anthropic/claude-opus-5, openai-codex/gpt-5.6-sol",
-	sonnet: "anthropic/claude-sonnet-5, openai-codex/gpt-5.6-sol",
+	fable: `anthropic/claude-fable-5-1, ${OMP_FALLBACK_MODEL}`,
+	haiku: `anthropic/claude-haiku-4-5, ${OMP_FALLBACK_MODEL}`,
+	opus: `anthropic/claude-opus-5, ${OMP_FALLBACK_MODEL}`,
+	sonnet: `anthropic/claude-sonnet-5, ${OMP_FALLBACK_MODEL}`,
 };
 
 interface Frontmatter {
