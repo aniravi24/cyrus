@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: fix/stale-session-recovery
+          ref: main
 
       - name: Compare versions and report drift
         shell: bash
@@ -48,9 +48,9 @@ jobs:
           title="Rebase fork onto upstream v${latest}"
           body="$(mktemp)"
           {
-            printf 'The fork source branch is based on upstream `v%s`; upstream has released `v%s`.\n\n' "$ours" "$latest"
+            printf 'Fork main is based on upstream `v%s`; upstream has released `v%s`.\n\n' "$ours" "$latest"
             printf 'Rebasing transplants only the fork patches:\n\n'
-            printf '    git rebase --onto v%s v%s fix/stale-session-recovery\n\n' "$latest" "$ours"
+            printf '    git rebase --onto v%s v%s main\n\n' "$latest" "$ours"
             printf 'Verify ancestry first - upstream rewrites release-prep commits, which orphans\n'
             printf "the old tag's lineage and makes a plain rebase replay the entire old branch:\n\n"
             printf '    git merge-base --is-ancestor v%s v%s\n\n' "$ours" "$latest"

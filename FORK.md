@@ -4,12 +4,12 @@ A downstream fork of [`ceedaragents/cyrus`](https://github.com/ceedaragents/cyru
 
 ## Branches
 
-| Branch                            | Contents                                                     |
-| --------------------------------- | ------------------------------------------------------------ |
-| `fix/stale-session-recovery`      | Source: upstream + the patches below                         |
-| `fix/stale-session-recovery-dist` | Same source plus compiled `dist/`, rebuilt by CI per release |
+| Branch | Contents                                                             |
+| ------ | -------------------------------------------------------------------- |
+| `main` | Upstream, rebased, plus the patches below. The only branch to edit    |
+| `dist` | The same tree plus compiled `dist/`, rebuilt by CI on every release   |
 
-The dist branch exists so a container build clones prebuilt JavaScript instead of compiling TypeScript at image build time. It is **generated** - never commit to it by hand; dispatch **Fork Release** instead.
+`dist` exists so a container build clones prebuilt JavaScript instead of compiling TypeScript at image build time. It is **generated** - never commit to it by hand, and never branch off it.
 
 ## Upstream baseline
 
@@ -30,23 +30,23 @@ Upstream PR: [#829](https://github.com/ceedaragents/cyrus/pull/829) (session rec
 
 | Workflow             | Trigger                | Purpose                                                                    |
 | -------------------- | ---------------------- | -------------------------------------------------------------------------- |
-| Fork CI              | push/PR to fork branch | Build, typecheck, test - upstream's `ci.yml` only covers `main`/`cypack-*` |
-| Fork Release         | manual dispatch        | Rebuild dist branch, tag `v<version>-fork.<n>`, cut a GitHub Release        |
+| Fork CI              | push/PR                | Build, typecheck, test - upstream's `ci.yml` covers its own repo only      |
+| Fork Release         | push to `main`         | Rebuild `dist`, tag `v<version>-fork.<n>`, cut a GitHub Release            |
 | Fork Upstream Watch  | weekly + manual        | Open an issue when upstream releases past this fork's baseline             |
 
 ## Releasing
 
-1. Land the change on the source branch (Fork CI must be green).
-2. Dispatch **Fork Release** (`dry_run: true` first if the tag numbering matters).
-3. Bump the consumer's pinned tag.
+Landing on `main` is the release: **Fork Release** runs on every push to it, rebuilds `dist`, tags `v<upstream-version>-fork.<n>`, and cuts a GitHub Release. Docs-only pushes are skipped. Then bump the consumer's pinned tag - Renovate opens that PR itself.
+
+Dispatch the workflow by hand only to re-cut a release without a new commit (`dry_run: true` to check the tag numbering first).
 
 ## Rebasing onto a new upstream release
 
 ```bash
 git fetch origin --tags
 git merge-base --is-ancestor v<old> v<new>   # nonzero => history was rewritten
-git rebase --onto v<new> v<old> fix/stale-session-recovery
+git rebase --onto v<new> v<old> main
 pnpm install && pnpm build                    # adapt patches to API changes
 ```
 
-`--onto` is mandatory, not a preference: upstream periodically rewrites release-prep commits, and once the old tag is no longer an ancestor of the new one a plain `git rebase <new-tag>` replays every commit of the old lineage instead of the handful of fork patches.
+Rebasing rewrites `main`, which is expected here: `main` is a patch stack over an upstream tag, and the only consumer pins tags rather than tracking the branch. `--onto` is mandatory, not a preference: upstream periodically rewrites release-prep commits, and once the old tag is no longer an ancestor of the new one a plain `git rebase <new-tag>` replays every commit of the old lineage instead of the handful of fork patches.
