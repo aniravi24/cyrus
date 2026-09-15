@@ -132,6 +132,68 @@ describe("RunnerSelectionService", () => {
 		expect(selection.fallbackModelOverride).toBe("gpt-5.2-codex");
 	});
 
+	it("keeps an omp default on a bare alias selector instead of routing to Claude", () => {
+		const service = new RunnerSelectionService({
+			defaultRunner: "omp",
+			ompDefaultFallbackModel: "openai-codex/gpt-6-astra",
+			ompDefaultModel: "opus",
+		} as EdgeWorkerConfig);
+
+		// The review kickoff comment: cheap reviewer model, no agent selector.
+		const review = service.determineRunnerSelection([], "[model=sonnet]");
+
+		expect(review.runnerType).toBe("omp");
+		// omp fuzzy-matches `sonnet` to claude-sonnet-4-0, so the alias is pinned.
+		expect(review.modelOverride).toBe("anthropic/claude-sonnet-5");
+		expect(review.fallbackModelOverride).toBe("anthropic/claude-haiku-4-5");
+	});
+
+	it("uses the writer alias and its same-provider fallback for an omp fix session", () => {
+		const service = new RunnerSelectionService({
+			defaultRunner: "omp",
+			ompDefaultFallbackModel: "openai-codex/gpt-6-astra",
+			ompDefaultModel: "opus",
+		} as EdgeWorkerConfig);
+
+		const fix = service.determineRunnerSelection([], "[model=opus]");
+
+		expect(fix.runnerType).toBe("omp");
+		expect(fix.modelOverride).toBe("anthropic/claude-opus-5");
+		expect(fix.fallbackModelOverride).toBe("anthropic/claude-sonnet-5");
+	});
+
+	it("falls back across providers only for a non-alias omp model", () => {
+		const service = new RunnerSelectionService({
+			defaultRunner: "omp",
+			ompDefaultFallbackModel: "openai-codex/gpt-6-astra",
+			ompDefaultModel: "opus",
+		} as EdgeWorkerConfig);
+
+		const selection = service.determineRunnerSelection(
+			[],
+			"[model=anthropic/claude-mythos-5]",
+		);
+
+		expect(selection.runnerType).toBe("omp");
+		expect(selection.modelOverride).toBe("anthropic/claude-mythos-5");
+		expect(selection.fallbackModelOverride).toBe("openai-codex/gpt-6-astra");
+	});
+
+	it("still honours an explicit agent selector against an omp default", () => {
+		const service = new RunnerSelectionService({
+			defaultRunner: "omp",
+			ompDefaultModel: "opus",
+		} as EdgeWorkerConfig);
+
+		const selection = service.determineRunnerSelection(
+			[],
+			"[agent=claude]\n[model=sonnet]",
+		);
+
+		expect(selection.runnerType).toBe("claude");
+		expect(selection.modelOverride).toBe("sonnet");
+	});
+
 	it("lets description selectors override provider/model labels", () => {
 		const service = new RunnerSelectionService({} as EdgeWorkerConfig);
 

@@ -135,6 +135,7 @@ import {
 	type FailureModesHttpClient,
 	type ResolvedSession,
 } from "cyrus-mcp-tools";
+import { OmpRunner } from "cyrus-omp-runner";
 import { OpenCodeRunner } from "cyrus-opencode-runner";
 import {
 	SlackEventTransport,
@@ -206,7 +207,10 @@ export function extractLeadingRunnerSelectors(
 ): string | undefined {
 	const handle = botUsername ? `@${botUsername}` : "@[\\w-]+";
 	const match = commentBody.match(
-		new RegExp(`^\\s*${handle}\\s*((?:\\[(?:model|agent)=[^\\]]+\\]\\s*)+)`, "i"),
+		new RegExp(
+			`^\\s*${handle}\\s*((?:\\[(?:model|agent)=[^\\]]+\\]\\s*)+)`,
+			"i",
+		),
 	);
 	return match?.[1]?.trim() || undefined;
 }
@@ -5688,6 +5692,8 @@ ${taskSection}`;
 				return new CursorRunner(config);
 			case "opencode":
 				return new OpenCodeRunner(config);
+			case "omp":
+				return new OmpRunner(config);
 			default:
 				throw new Error(`Unknown runner type: ${runnerType satisfies never}`);
 		}

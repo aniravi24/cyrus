@@ -9,6 +9,7 @@ export const RunnerTypeSchema = z.enum([
 	"codex",
 	"cursor",
 	"opencode",
+	"omp",
 ]);
 export type RunnerType = z.infer<typeof RunnerTypeSchema>;
 
@@ -95,6 +96,19 @@ export const OpenCodeConfigSchema = z.object({
 	stateScope: OpenCodeStateScopeSchema.optional(),
 	config: JsonObjectSchema.optional(),
 });
+
+/**
+ * OMP runner overrides. The tool surface belongs to omp itself, so this only
+ * covers how Cyrus launches it: binary, approval tier, and how much subagent
+ * activity is forwarded into the issue timeline.
+ */
+export const OmpConfigSchema = z.object({
+	ompPath: z.string().optional(),
+	approvalMode: z.enum(["always-ask", "write", "yolo"]).optional(),
+	subagentSubscription: z.enum(["off", "progress", "events"]).optional(),
+	includeThinking: z.boolean().optional(),
+});
+export type OmpConfig = z.infer<typeof OmpConfigSchema>;
 
 /**
  * Tool restriction options for label-based prompts
@@ -422,6 +436,15 @@ export const EdgeConfigSchema = z.object({
 
 	/** Global OpenCode runtime config overrides */
 	opencode: OpenCodeConfigSchema.optional(),
+
+	/** Default OMP model to use across all repositories (e.g., "anthropic/claude-sonnet-4-5", "opus") */
+	ompDefaultModel: z.string().optional(),
+
+	/** Default OMP fallback model if the primary OMP model is unavailable */
+	ompDefaultFallbackModel: z.string().optional(),
+
+	/** Global OMP runner overrides (binary path, approval mode, subagent forwarding) */
+	omp: OmpConfigSchema.optional(),
 
 	/**
 	 * Default runner/harness to use when no runner is specified via labels or description tags.

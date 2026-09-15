@@ -10,6 +10,7 @@ import type {
 	OmpContentBlock,
 	OmpFrame,
 	OmpMessageEndFrame,
+	OmpSessionStats,
 	OmpSubagentFrame,
 	OmpToolExecutionEndFrame,
 	OmpToolExecutionStartFrame,
@@ -57,6 +58,7 @@ export class OmpEventMapper {
 	private emittedToolUseIds = new Set<string>();
 	private lastAssistantText = "";
 	private startedAtMs = Date.now();
+	private stats: OmpSessionStats | null = null;
 
 	constructor(private readonly options: OmpEventMapperOptions) {}
 
@@ -74,6 +76,15 @@ export class OmpEventMapper {
 
 	resetTimer(): void {
 		this.startedAtMs = Date.now();
+	}
+
+	/**
+	 * Fold omp's own accounting into the next result message. Without this the
+	 * result reports a zero cost, which reads as "this session was free" rather
+	 * than "cost unknown" everywhere Cyrus aggregates spend.
+	 */
+	applySessionStats(stats: OmpSessionStats): void {
+		this.stats = stats;
 	}
 
 	/** Synthetic `system:init`, emitted once, as the edge worker expects it first. */
@@ -218,9 +229,9 @@ export class OmpEventMapper {
 			num_turns: 1,
 			stop_reason: null,
 			errors: [errorMessage],
-			total_cost_usd: 0,
-			usage: this.emptyUsage(),
-			modelUsage: {},
+			total_cost_usd: this.stats?.cost ?? 0,
+			usage: this.usage(),
+			modelUsage: this.modelUsage(),
 			permission_denials: [],
 			uuid: crypto.randomUUID(),
 			session_id: this.sessionId,
@@ -234,12 +245,12 @@ export class OmpEventMapper {
 			duration_ms: Math.max(Date.now() - this.startedAtMs, 0),
 			duration_api_ms: 0,
 			is_error: false,
-			num_turns: 1,
+			num_turns: this.stats?.assistantMessages ?? 1,
 			result: text,
 			stop_reason: null,
-			total_cost_usd: 0,
-			usage: this.emptyUsage(),
-			modelUsage: {},
+			total_cost_usd: this.stats?.cost ?? 0,
+			usage: this.usage(),
+			modelUsage: this.modelUsage(),
 			permission_denials: [],
 			uuid: crypto.randomUUID(),
 			session_id: this.sessionId,
@@ -299,16 +310,41 @@ export class OmpEventMapper {
 		};
 	}
 
-	private emptyUsage(): SDKResultMessage["usage"] {
+	private usage(): SDKResultMessage["usage"] {
+		const tokens = this.stats?.tokens;
 		return {
-			input_tokens: 0,
-			output_tokens: 0,
-			cache_creation_input_tokens: 0,
-			cache_read_input_tokens: 0,
+			input_tokens: tokens?.input ?? 0,
+			output_tokens: tokens?.output ?? 0,
+			cache_creation_input_tokens: tokens?.cacheWrite ?? 0,
+			cache_read_input_tokens: tokens?.cacheRead ?? 0,
 			cache_creation: {
 				ephemeral_1h_input_tokens: 0,
 				ephemeral_5m_input_tokens: 0,
 			},
 		} as SDKResultMessage["usage"];
+	}
+
+	/**
+	 * Names the concrete models a session routed to, which differ from the
+	 * requested one after a fallback or an account rotation. omp reports a call
+	 * count per model but no per-model tokens or cost, so those fields stay zero
+	 * here and the session total on the result carries the real numbers.
+	 */
+	private modelUsage(): SDKResultMessage["modelUsage"] {
+		const routed = this.stats?.routedModels;
+		if (!routed) return {};
+		const entries = Object.keys(routed).map((model) => [
+			model,
+			{
+				inputTokens: 0,
+				outputTokens: 0,
+				cacheReadInputTokens: 0,
+				cacheCreationInputTokens: 0,
+				webSearchRequests: 0,
+				costUSD: 0,
+				contextWindow: 0,
+			},
+		]);
+		return Object.fromEntries(entries) as SDKResultMessage["modelUsage"];
 	}
 }
