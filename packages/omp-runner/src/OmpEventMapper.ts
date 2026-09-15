@@ -48,9 +48,8 @@ function blockText(
 }
 
 /**
- * Maps omp RPC frames onto the Claude-SDK message shapes the Cyrus edge worker
- * consumes. Stateful only where the wire protocol splits one logical message
- * across frames (tool call start/end) or omits a session id until `get_state`.
+ * Maps omp RPC frames onto the Claude-SDK shapes the edge worker consumes.
+ * Stateful only where one logical message spans frames (tool call start/end).
  */
 export class OmpEventMapper {
 	private sessionId: string = PENDING_SESSION;
@@ -78,11 +77,7 @@ export class OmpEventMapper {
 		this.startedAtMs = Date.now();
 	}
 
-	/**
-	 * Fold omp's own accounting into the next result message. Without this the
-	 * result reports a zero cost, which reads as "this session was free" rather
-	 * than "cost unknown" everywhere Cyrus aggregates spend.
-	 */
+	/** Without this a result reports zero cost, which reads as free rather than unknown. */
 	applySessionStats(stats: OmpSessionStats): void {
 		this.stats = stats;
 	}
@@ -337,12 +332,7 @@ export class OmpEventMapper {
 		} as SDKResultMessage["usage"];
 	}
 
-	/**
-	 * Names the concrete models a session routed to, which differ from the
-	 * requested one after a fallback or an account rotation. omp reports a call
-	 * count per model but no per-model tokens or cost, so those fields stay zero
-	 * here and the session total on the result carries the real numbers.
-	 */
+	/** Names the models actually routed to; omp reports no per-model tokens or cost, so those stay zero. */
 	private modelUsage(): SDKResultMessage["modelUsage"] {
 		const routed = this.stats?.routedModels;
 		if (!routed) return {};

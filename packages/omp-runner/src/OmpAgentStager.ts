@@ -3,25 +3,15 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 /**
- * Cyrus ships its subagent definitions as Claude SDK plugin directories. omp
- * deliberately skips cross-harness agent roots - `.claude/agents` and friends -
- * because their frontmatter is not the omp task-agent contract, so a dispatch by
- * `subagent_type` would fail and the caller would silently degrade to a bare
- * model at default effort.
- *
- * This translates each definition into omp's contract and writes it to omp's own
- * user agents directory, keeping one source of truth in the plugin.
+ * Translates Cyrus's plugin subagent definitions into omp's task-agent contract.
+ * omp skips cross-harness agent roots (`.claude/agents`), so without this a
+ * `subagent_type` dispatch fails and the pass drops to a bare default model.
  */
 
 /**
- * Claude aliases resolve newest-first only by luck in omp's fuzzy matcher
- * (`sonnet` lands on claude-sonnet-4-0), so each alias is pinned. The second
- * entry is a cross-provider fallback: omp tries the list in order, so an
- * exhausted Anthropic account moves the pass to Codex instead of failing it.
- *
- * This is the default mapping only. A definition needing a different model - a
- * frontier model for an architectural pass, say - sets `omp-model` and its
- * selector list is taken verbatim.
+ * Aliases pinned because omp's fuzzy matcher is not newest-first (`sonnet` lands
+ * on claude-sonnet-4-0). Second entry is the cross-provider fallback omp tries
+ * next. A definition needing another model sets `omp-model` and wins verbatim.
  */
 const OMP_FALLBACK_MODEL = "openai-codex/gpt-5.6-sol";
 
@@ -50,27 +40,16 @@ function parseFrontmatter(source: string): Frontmatter | null {
 	return { body: source.slice(end + 4).replace(/^\n/, ""), fields };
 }
 
-/**
- * omp's user agents directory.
- *
- * Agents resolve from the *config* dir (`~/.omp/agent/agents`), not from
- * `PI_CODING_AGENT_DIR` - that override relocates credential and session state
- * only, and staging into it leaves the definitions undiscovered.
- */
+/** Agents resolve from the config dir, not PI_CODING_AGENT_DIR (that moves credential/session state). */
 export function ompAgentsDir(env: Record<string, string | undefined>): string {
 	const home = env.HOME ?? homedir();
 	return join(home, env.PI_CONFIG_DIR ?? ".omp", "agent", "agents");
 }
 
 /**
- * Translate every plugin agent definition into omp's contract.
- *
- * - `model: opus` becomes a pinned, prioritized selector list
- * - `effort: high` becomes omp's `thinking-level`
- * - everything else is carried through untouched
- *
- * Returns the agent names written. Missing directories are not an error: a
- * session whose config ships no plugins simply has no agents to stage.
+ * `model: opus` becomes a pinned selector list, `effort` becomes `thinking-level`,
+ * everything else carries through. Returns the names written; a missing directory
+ * is not an error.
  */
 export function stageOmpAgents(
 	pluginPaths: ReadonlyArray<string>,
