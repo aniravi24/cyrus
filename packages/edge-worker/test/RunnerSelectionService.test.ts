@@ -145,7 +145,8 @@ describe("RunnerSelectionService", () => {
 		expect(review.runnerType).toBe("omp");
 		// omp fuzzy-matches `sonnet` to claude-sonnet-4-0, so the alias is pinned.
 		expect(review.modelOverride).toBe("anthropic/claude-sonnet-5");
-		expect(review.fallbackModelOverride).toBe("anthropic/claude-haiku-4-5");
+		// The single configured fallback, not a per-alias ladder.
+		expect(review.fallbackModelOverride).toBe("openai-codex/gpt-6-astra");
 	});
 
 	it("uses the writer alias and its same-provider fallback for an omp fix session", () => {
@@ -159,7 +160,7 @@ describe("RunnerSelectionService", () => {
 
 		expect(fix.runnerType).toBe("omp");
 		expect(fix.modelOverride).toBe("anthropic/claude-opus-5");
-		expect(fix.fallbackModelOverride).toBe("anthropic/claude-sonnet-5");
+		expect(fix.fallbackModelOverride).toBe("openai-codex/gpt-6-astra");
 	});
 
 	it("falls back across providers only for a non-alias omp model", () => {

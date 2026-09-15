@@ -269,11 +269,11 @@ export class RunnerSelectionService {
 			if (runnerType === "opencode") {
 				return defaultFallbackByRunner.opencode;
 			}
+			// One configured fallback for every omp model: omp already rotates
+			// accounts and switches providers on its own (`retry_fallback_applied`),
+			// so a second per-alias ladder here would only add a rule nobody asked
+			// for on top of the knob that is actually set.
 			if (runnerType === "omp") {
-				if (normalizedModel === "fable") return "opus";
-				if (normalizedModel === "opus") return "sonnet";
-				if (normalizedModel === "sonnet") return "haiku";
-				if (normalizedModel === "haiku") return "sonnet";
 				return defaultFallbackByRunner.omp;
 			}
 			if (isCodexModel(normalizedModel)) {
