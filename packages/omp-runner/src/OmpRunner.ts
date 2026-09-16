@@ -1,10 +1,11 @@
 import { EventEmitter } from "node:events";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import type { IAgentRunner, IMessageFormatter, SDKMessage } from "cyrus-core";
 import { OmpMessageFormatter } from "./formatter.js";
-import { ompAgentsDir, stageOmpAgents } from "./OmpAgentStager.js";
+import { stageOmpAgents } from "./OmpAgentStager.js";
 
 import { OMP_ABORT_MARKER, OmpEventMapper } from "./OmpEventMapper.js";
 
@@ -324,15 +325,33 @@ export class OmpRunner extends EventEmitter implements IAgentRunner {
 	}
 
 	/**
-	 * `disabledServers` is omp's highest-precedence denylist and is read from the
-	 * user config dir, so it is written next to the staged agents rather than
-	 * into the repository checkout.
+	 * `disabledServers` is omp's highest-precedence denylist, read from the user
+	 * MCP config in the *active native agent directory*. `PI_CODING_AGENT_DIR`
+	 * relocates that directory, so the denylist must follow it: writing to
+	 * `$HOME/.omp/agent` while a session runs against a relocated dir leaves the
+	 * allowlist unenforced at the server level. Merges into any existing file so a
+	 * plugin-provided `mcpServers` entry there survives.
 	 */
 	private writeMcpDenylist(disabledServers: ReadonlyArray<string>): void {
-		const agentsDir = ompAgentsDir({ ...process.env, ...this.config.env });
-		const file = join(agentsDir, "..", "mcp.json");
-		mkdirSync(join(agentsDir, ".."), { recursive: true });
-		writeFileSync(file, `${JSON.stringify({ disabledServers }, null, "\t")}\n`);
+		const env = { ...process.env, ...this.config.env };
+		const dir =
+			env.PI_CODING_AGENT_DIR ??
+			join(env.HOME ?? homedir(), env.PI_CONFIG_DIR ?? ".omp", "agent");
+		const file = join(dir, "mcp.json");
+		mkdirSync(dir, { recursive: true });
+		let existing: Record<string, unknown> = {};
+		try {
+			existing = JSON.parse(readFileSync(file, "utf8")) as Record<
+				string,
+				unknown
+			>;
+		} catch {
+			// No prior file, or unparseable: the denylist still has to land.
+		}
+		writeFileSync(
+			file,
+			`${JSON.stringify({ ...existing, disabledServers }, null, "\t")}\n`,
+		);
 	}
 
 	private handleFrame(frame: OmpFrame): void {

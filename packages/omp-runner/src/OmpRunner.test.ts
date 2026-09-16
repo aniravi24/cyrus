@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { OMP_ABORT_MARKER, OmpRunner } from "./OmpRunner.js";
 import type { OmpFrame, OmpResponseFrame, OmpRpcProcessLike } from "./types.js";
@@ -179,5 +182,49 @@ describe("OmpRunner", () => {
 			);
 		expect(texts.join(" ")).toContain("Model fallback");
 		expect(texts.join(" ")).toContain("anthropic/claude-opus-5:high");
+	});
+
+	it("writes the MCP denylist into the relocated agent dir, keeping existing servers", async () => {
+		// omp reads `disabledServers` from the user MCP config in its ACTIVE native
+		// agent directory. PI_CODING_AGENT_DIR relocates that directory, so writing
+		// to $HOME/.omp/agent leaves every server reachable at runtime.
+		const agentDir = mkdtempSync(join(tmpdir(), "omp-agent-dir-"));
+		const workDir = mkdtempSync(join(tmpdir(), "omp-work-"));
+		// A plugin-provided server already in the agent dir's user config: the
+		// denylist write must not clobber it.
+		writeFileSync(
+			join(agentDir, "mcp.json"),
+			JSON.stringify({ mcpServers: { "context-mode": { command: "node" } } }),
+		);
+		writeFileSync(
+			join(workDir, ".mcp.json"),
+			JSON.stringify({
+				mcpServers: { codanna: { command: "c" }, stripe: { command: "s" } },
+			}),
+		);
+		const fake = new FakeProcess(
+			{ command: "prompt", id: "cyrus_1", success: true, type: "response" },
+			[{ isTerminal: true, messages: [], type: "agent_end" }],
+		);
+		const runner = new OmpRunner({
+			allowedTools: ["mcp__codanna"],
+			cyrusHome: agentDir,
+			env: { PI_CODING_AGENT_DIR: agentDir },
+			model: "anthropic/claude-opus-5",
+			processFactory: () => fake,
+			workingDirectory: workDir,
+			workspaceName: "test",
+		});
+
+		await runner.start("say hi");
+
+		const written = JSON.parse(
+			readFileSync(join(agentDir, "mcp.json"), "utf8"),
+		) as {
+			disabledServers?: string[];
+			mcpServers?: Record<string, unknown>;
+		};
+		expect(written.disabledServers ?? []).toContain("stripe");
+		expect(Object.keys(written.mcpServers ?? {})).toContain("context-mode");
 	});
 });
