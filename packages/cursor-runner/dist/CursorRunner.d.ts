@@ -1,0 +1,62 @@
+import { EventEmitter } from "node:events";
+import type { IAgentRunner, IMessageFormatter, SDKMessage } from "cyrus-core";
+import type { CursorRunnerConfig, CursorRunnerEvents, CursorSessionInfo } from "./types.js";
+export declare interface CursorRunner {
+    on<K extends keyof CursorRunnerEvents>(event: K, listener: CursorRunnerEvents[K]): this;
+    emit<K extends keyof CursorRunnerEvents>(event: K, ...args: Parameters<CursorRunnerEvents[K]>): boolean;
+}
+export declare class CursorRunner extends EventEmitter implements IAgentRunner {
+    readonly supportsStreamingInput = false;
+    private config;
+    private sessionInfo;
+    private messages;
+    private formatter;
+    private agent;
+    private currentRun;
+    private pendingResultMessage;
+    private hasInitMessage;
+    private lastAssistantText;
+    private assistantTextBuffer;
+    private tokenTotals;
+    private wasStopped;
+    private startTimestampMs;
+    private errorMessages;
+    private emittedToolUseIds;
+    private logStream;
+    private hooksRestoreState;
+    private sandboxRestoreState;
+    private sandboxEnvRestoreState;
+    private permissionsArtifactsInstalled;
+    constructor(config: CursorRunnerConfig);
+    start(prompt: string): Promise<CursorSessionInfo>;
+    startStreaming(_initialPrompt?: string): Promise<CursorSessionInfo>;
+    addStreamMessage(_content: string): void;
+    completeStream(): void;
+    stop(): void;
+    isRunning(): boolean;
+    getMessages(): SDKMessage[];
+    getFormatter(): IMessageFormatter;
+    private handleSdkEvent;
+    private handleAssistantEvent;
+    private handleUserEvent;
+    private handleToolCallEvent;
+    private handleThinkingEvent;
+    private handleStatusEvent;
+    private installPermissionsArtifacts;
+    private installSandboxArtifacts;
+    private uninstallSandboxArtifacts;
+    private locatePermissionCheckSource;
+    private uninstallPermissionsArtifacts;
+    private emitToolUse;
+    private emitToolResult;
+    private pushAssistantText;
+    private flushAssistantTextBuffer;
+    private emitInitMessage;
+    private createSuccessResultMessage;
+    private createErrorResultMessage;
+    private pushMessage;
+    private setupLogging;
+    private finalizeSession;
+    private cleanupRuntimeState;
+}
+//# sourceMappingURL=CursorRunner.d.ts.map

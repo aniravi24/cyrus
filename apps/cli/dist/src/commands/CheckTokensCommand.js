@@ -1,0 +1,68 @@
+import { BaseCommand } from "./ICommand.js";
+/**
+ * Helper function to check Linear token status
+ */
+async function checkLinearToken(token) {
+    try {
+        const response = await fetch("https://api.linear.app/graphql", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: token,
+            },
+            body: JSON.stringify({
+                query: "{ viewer { id email name } }",
+            }),
+        });
+        const data = (await response.json());
+        if (data.errors) {
+            return {
+                valid: false,
+                error: data.errors[0]?.message || "Unknown error",
+            };
+        }
+        return { valid: true };
+    }
+    catch (error) {
+        return { valid: false, error: error.message };
+    }
+}
+/**
+ * Check tokens command - check the status of all Linear tokens
+ */
+export class CheckTokensCommand extends BaseCommand {
+    async execute(_args) {
+        if (!this.app.config.exists()) {
+            this.logError("No edge configuration found. Please run setup first.");
+            process.exit(1);
+        }
+        const config = this.app.config.load();
+        console.log("Checking Linear tokens...\n");
+        // Check tokens at the workspace level
+        const checkedWorkspaces = new Set();
+        for (const repo of config.repositories) {
+            const workspaceId = repo.linearWorkspaceId;
+            if (!workspaceId)
+                continue;
+            if (checkedWorkspaces.has(workspaceId))
+                continue;
+            checkedWorkspaces.add(workspaceId);
+            const token = config.linearWorkspaces?.[workspaceId]?.linearToken;
+            const workspaceName = config.linearWorkspaces?.[workspaceId]?.linearWorkspaceName ||
+                workspaceId;
+            process.stdout.write(`Workspace ${workspaceName}: `);
+            if (!token) {
+                console.log(`❌ No token configured`);
+                continue;
+            }
+            const result = await checkLinearToken(token);
+            if (result.valid) {
+                console.log("✅ Valid");
+            }
+            else {
+                console.log(`❌ Invalid - ${result.error}`);
+            }
+        }
+    }
+}
+//# sourceMappingURL=CheckTokensCommand.js.map
