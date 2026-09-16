@@ -587,7 +587,9 @@ export class RunnerConfigBuilder {
 	}
 
 	private runnerSupportsManagedSkills(runnerType: RunnerType): boolean {
-		return runnerType === "claude" || runnerType === "codex";
+		return (
+			runnerType === "claude" || runnerType === "codex" || runnerType === "omp"
+		);
 	}
 
 	/**
