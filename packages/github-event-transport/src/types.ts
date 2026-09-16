@@ -51,6 +51,7 @@ export interface GitHubWebhookEvent {
 		| GitHubIssueCommentPayload
 		| GitHubPullRequestReviewCommentPayload
 		| GitHubPullRequestReviewPayload
+		| GitHubPullRequestPayload
 		| GitHubPushPayload;
 	/** GitHub installation token forwarded from CYHOST (1-hour expiry) */
 	installationToken?: string;
@@ -63,12 +64,17 @@ export type GitHubEventType =
 	| "issue_comment"
 	| "pull_request_review_comment"
 	| "pull_request_review"
+	| "pull_request"
 	| "push";
 
 /**
- * Comment-related GitHub event types (excludes push)
+ * Comment-related GitHub event types (excludes push and pull_request, neither of
+ * which carries a comment body).
  */
-export type GitHubCommentEventType = Exclude<GitHubEventType, "push">;
+export type GitHubCommentEventType = Exclude<
+	GitHubEventType,
+	"push" | "pull_request"
+>;
 
 /**
  * Comment/review webhook event (excludes push events).
@@ -243,6 +249,21 @@ export interface GitHubPullRequestReviewPayload {
 	action: "submitted" | "edited" | "dismissed";
 	review: GitHubReview;
 	pull_request: GitHubPullRequest;
+	repository: GitHubRepository;
+	sender: GitHubUser;
+	installation?: GitHubInstallation;
+}
+
+/**
+ * Pull request lifecycle webhook. Only `closed` is consumed: it is the one
+ * signal that work on a PR is over, and without it a running session keeps
+ * reviewing a merged or abandoned branch until it finishes on its own.
+ * @see https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request
+ */
+export interface GitHubPullRequestPayload {
+	action: string;
+	/** `merged` distinguishes a merge from an abandon; present on `closed`. */
+	pull_request: GitHubPullRequest & { merged?: boolean };
 	repository: GitHubRepository;
 	sender: GitHubUser;
 	installation?: GitHubInstallation;

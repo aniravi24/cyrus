@@ -147,6 +147,40 @@ describe("GitHubEventTransport", () => {
 			);
 		});
 
+		it("emits pull_request only for the closed action", async () => {
+			// `closed` is the one signal that a PR's work is over. Everything else -
+			// opened, synchronize, labeled - would start or duplicate work that the
+			// kickoff @-mention already drives.
+			const eventListener = vi.fn();
+			transport.on("event", eventListener);
+			const handler = mockFastify.routes["/github-webhook"]!;
+			const headers = {
+				authorization: `Bearer ${testSecret}`,
+				"x-github-delivery": "delivery-pr",
+				"x-github-event": "pull_request",
+			};
+			const prPayload = (action: string) => ({
+				action,
+				pull_request: { merged: action === "closed", number: 4457 },
+				repository: { full_name: "prophetiqhq/prophetiq" },
+				sender: { login: "aniravi24" },
+			});
+
+			await handler(
+				createMockRequest(prPayload("synchronize"), headers),
+				createMockReply(),
+			);
+			expect(eventListener).not.toHaveBeenCalled();
+
+			await handler(
+				createMockRequest(prPayload("closed"), headers),
+				createMockReply(),
+			);
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({ eventType: "pull_request" }),
+			);
+		});
+
 		it("rejects missing Authorization header", async () => {
 			const request = createMockRequest(issueCommentPayload, {
 				"x-github-event": "issue_comment",

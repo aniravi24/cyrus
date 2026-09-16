@@ -9,6 +9,7 @@ import type {
 	GitHubEventTransportEvents,
 	GitHubEventType,
 	GitHubIssueCommentPayload,
+	GitHubPullRequestPayload,
 	GitHubPullRequestReviewCommentPayload,
 	GitHubPullRequestReviewPayload,
 	GitHubPushPayload,
@@ -243,6 +244,7 @@ export class GitHubEventTransport extends EventEmitter {
 			eventType !== "issue_comment" &&
 			eventType !== "pull_request_review_comment" &&
 			eventType !== "pull_request_review" &&
+			eventType !== "pull_request" &&
 			eventType !== "push"
 		) {
 			this.logger.debug(`Ignoring unsupported event type: ${eventType}`);
@@ -254,6 +256,7 @@ export class GitHubEventTransport extends EventEmitter {
 			| GitHubIssueCommentPayload
 			| GitHubPullRequestReviewCommentPayload
 			| GitHubPullRequestReviewPayload
+			| GitHubPullRequestPayload
 			| GitHubPushPayload;
 
 		// Push events don't have an action field — always emit them
@@ -264,6 +267,17 @@ export class GitHubEventTransport extends EventEmitter {
 			if ((payload as GitHubPullRequestReviewPayload).action !== "submitted") {
 				this.logger.debug(
 					`Ignoring ${eventType} with action: ${(payload as GitHubPullRequestReviewPayload).action}`,
+				);
+				reply.code(200).send({ success: true, ignored: true });
+				return;
+			}
+		} else if (eventType === "pull_request") {
+			// Only `closed` (merge and abandon both land here). Every other action -
+			// opened, synchronize, labeled, review_requested - would be noise: the
+			// review pipeline is driven by an @-mention from the kickoff workflow.
+			if ((payload as GitHubPullRequestPayload).action !== "closed") {
+				this.logger.debug(
+					`Ignoring ${eventType} with action: ${(payload as GitHubPullRequestPayload).action}`,
 				);
 				reply.code(200).send({ success: true, ignored: true });
 				return;

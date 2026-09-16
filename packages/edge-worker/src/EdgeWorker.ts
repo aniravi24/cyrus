@@ -101,6 +101,7 @@ import {
 	GitHubCommentService,
 	type GitHubCommentWebhookEvent,
 	GitHubEventTransport,
+	type GitHubPullRequestPayload,
 	type GitHubPushPayload,
 	type GitHubWebhookEvent,
 	isCommentOnPullRequest,
@@ -1036,6 +1037,20 @@ export class EdgeWorker extends EventEmitter {
 				);
 				return;
 			}
+			// A closed PR (merged or abandoned) ends the work: any session still
+			// running is reviewing a branch nobody can act on, and it holds provider
+			// quota that gates every other session.
+			if (event.eventType === "pull_request") {
+				this.handleGitHubPullRequestClosed(
+					event.payload as GitHubPullRequestPayload,
+				).catch((error) => {
+					this.logger.error(
+						"Failed to handle closed GitHub pull request",
+						error instanceof Error ? error : new Error(String(error)),
+					);
+				});
+				return;
+			}
 			this.handleGitHubWebhook(event as GitHubCommentWebhookEvent).catch(
 				(error) => {
 					this.logger.error(
@@ -1873,6 +1888,33 @@ export class EdgeWorker extends EventEmitter {
 			});
 		} else {
 			this.activeGitHubPrSessions.delete(sessionKey);
+		}
+	}
+
+	/**
+	 * Stop every session for a PR that just closed, merged or not, and drop any
+	 * events queued behind it. Nothing else observes a close: the review is
+	 * driven by an @-mention, so a session started before the merge otherwise
+	 * runs its full course against a branch nobody can act on. On a subscription
+	 * the cost is provider quota, which gates whether other sessions run at all.
+	 */
+	private async handleGitHubPullRequestClosed(
+		payload: GitHubPullRequestPayload,
+	): Promise<void> {
+		const sessionKey = `github:${payload.repository.full_name}#${payload.pull_request.number}`;
+		this.queuedGitHubPrEvents.delete(sessionKey);
+		this.activeGitHubPrSessions.delete(sessionKey);
+
+		const sessions = this.agentSessionManager.getSessionsByIssueId(sessionKey);
+		const live = sessions.filter((session) => session.agentRunner?.isRunning());
+		if (live.length === 0) return;
+
+		this.logger.info(
+			`PR ${sessionKey} closed (${payload.pull_request.merged ? "merged" : "unmerged"}); stopping ${live.length} session(s)`,
+		);
+		for (const session of live) {
+			this.agentSessionManager.requestSessionStop(session.id);
+			session.agentRunner?.stop();
 		}
 	}
 
