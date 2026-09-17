@@ -1,0 +1,386 @@
+import { EventEmitter } from "node:events";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { cwd } from "node:process";
+import { OmpMessageFormatter } from "./formatter.js";
+import { stageOmpAgents } from "./OmpAgentStager.js";
+import { OMP_ABORT_MARKER, OmpEventMapper } from "./OmpEventMapper.js";
+export { OMP_ABORT_MARKER };
+import { resolveMcpPolicy } from "./OmpMcpPolicy.js";
+import { OmpRpcProcess } from "./OmpRpcProcess.js";
+const DEFAULT_MODEL_DISPLAY = "omp default model";
+/** Marker on every aborted-session result; automation keys off it instead of provider error prose. */
+/** Commands whose failure ends the run rather than just the command. */
+const PROMPT_COMMANDS = {
+    abort_and_prompt: true,
+    follow_up: true,
+    prompt: true,
+    steer: true,
+};
+/** UI methods that block a tool call until the host answers. */
+const BLOCKING_UI_METHODS = {
+    confirm: true,
+    editor: true,
+    input: true,
+    select: true,
+};
+/**
+ * Runs a Cyrus session on `omp --mode rpc`, projecting its events onto the
+ * Claude-SDK messages the edge worker consumes. `allowedTools` is deliberately
+ * not forwarded: the tool surface is omp's, and guards are the repo's own hooks.
+ */
+export class OmpRunner extends EventEmitter {
+    config;
+    supportsStreamingInput = true;
+    process = null;
+    mapper;
+    formatter = new OmpMessageFormatter();
+    messages = [];
+    sessionInfo = null;
+    streaming = false;
+    streamClosed = false;
+    finalized = false;
+    emittedResult = false;
+    runSettled = null;
+    settled = Promise.resolve();
+    constructor(config) {
+        super();
+        this.config = config;
+        this.mapper = this.createMapper();
+    }
+    async start(prompt) {
+        const info = await this.launch();
+        try {
+            await this.prompt(prompt);
+        }
+        catch (error) {
+            this.failRun(error instanceof Error ? error.message : String(error));
+        }
+        await this.settled;
+        this.finalize();
+        this.process?.stop();
+        return info;
+    }
+    async startStreaming(initialPrompt) {
+        const info = await this.launch();
+        this.streaming = true;
+        this.streamClosed = false;
+        if (initialPrompt)
+            await this.prompt(initialPrompt);
+        return info;
+    }
+    addStreamMessage(content) {
+        if (!this.streaming || this.streamClosed) {
+            throw new Error("omp runner is not accepting stream messages");
+        }
+        // follow_up queues behind the active turn and starts a new one when idle,
+        // which is the semantics Cyrus wants for a comment arriving mid-session.
+        this.process?.notify({ type: "follow_up", message: content });
+    }
+    completeStream() {
+        this.streamClosed = true;
+    }
+    isStreaming() {
+        return this.streaming && !this.streamClosed && this.isRunning();
+    }
+    stop() {
+        // Cleanup paths in Cyrus routinely call stop() after omp already exited,
+        // so nothing here may depend on a live child.
+        if (this.process?.isRunning())
+            this.process.notify({ type: "abort" });
+        this.process?.stop();
+        this.finalize();
+    }
+    async interrupt() {
+        // Cyrus branches on isWarm() and can reach here after the child died; an
+        // interrupt with nothing to interrupt is a no-op, not an error.
+        if (!this.process?.isRunning())
+            return;
+        await this.process.command({ type: "abort" });
+    }
+    isWarm() {
+        // The RPC session stays open between turns, so steering and follow-ups
+        // land on the same omp session instead of restarting it.
+        return true;
+    }
+    isRunning() {
+        return (this.sessionInfo?.isRunning === true && this.process?.isRunning() === true);
+    }
+    getMessages() {
+        return [...this.messages];
+    }
+    getFormatter() {
+        return this.formatter;
+    }
+    createMapper() {
+        return new OmpEventMapper({
+            includeThinking: this.config.omp?.includeThinking ?? this.config.includeThinking,
+            mcpServers: Object.keys(this.config.mcpConfig ?? {}),
+            model: this.config.model ?? DEFAULT_MODEL_DISPLAY,
+            tools: this.config.allowedTools ?? [],
+            workingDirectory: this.config.workingDirectory ?? cwd(),
+        });
+    }
+    async launch() {
+        if (this.process)
+            throw new Error("omp runner already started");
+        this.mapper = this.createMapper();
+        this.mapper.resetTimer();
+        this.messages = [];
+        this.finalized = false;
+        this.emittedResult = false;
+        this.settled = new Promise((resolve) => {
+            this.runSettled = resolve;
+        });
+        this.stageAgents();
+        const options = {
+            args: this.buildArgs(),
+            cwd: this.config.workingDirectory ?? cwd(),
+            env: { ...process.env, ...this.config.env },
+            ompPath: this.config.omp?.ompPath ?? this.config.ompPath ?? "omp",
+        };
+        const proc = this.config.processFactory
+            ? this.config.processFactory(options)
+            : new OmpRpcProcess(options);
+        this.process = proc;
+        proc.on("frame", (frame) => this.handleFrame(frame));
+        proc.on("processError", (error) => this.emitError(error));
+        proc.on("exit", ({ code, stderr }) => {
+            if (!this.finalized && !this.emittedResult) {
+                const detail = code === 0
+                    ? "omp exited before the run completed"
+                    : `omp exited with code ${String(code)}`;
+                this.pushMessage(this.mapper.errorResult(`${OMP_ABORT_MARKER} ${detail}: ${stderr.slice(-500)}`));
+            }
+            this.settleRun();
+            this.finalize();
+        });
+        // Anything that throws past this point leaves a spawned child with nobody
+        // holding it, so startup failures tear it down before rethrowing.
+        try {
+            await proc.start();
+            proc.notify({
+                level: this.config.omp?.subagentSubscription ??
+                    this.config.subagentSubscription ??
+                    "progress",
+                type: "set_subagent_subscription",
+            });
+            const state = await proc.command({ type: "get_state" });
+            const sessionId = typeof state.data?.sessionId === "string" ? state.data.sessionId : "";
+            this.mapper.setSessionId(sessionId);
+        }
+        catch (error) {
+            proc.stop();
+            this.process = null;
+            throw error;
+        }
+        this.sessionInfo = {
+            isRunning: true,
+            sessionId: this.mapper.getSessionId(),
+            startedAt: new Date(),
+        };
+        for (const message of this.mapper.systemInit())
+            this.pushMessage(message);
+        return this.sessionInfo;
+    }
+    async prompt(message) {
+        const response = await this.process?.command({
+            message,
+            streamingBehavior: "followUp",
+            type: "prompt",
+        });
+        if (response && !response.success) {
+            throw new Error(`omp rejected the prompt: ${response.error ?? "unknown error"}`);
+        }
+        // A local-only prompt (slash command) never produces agent_end, so it is
+        // complete the moment the response says the agent was not invoked.
+        if (response?.data?.agentInvoked === false)
+            this.settleRun();
+    }
+    buildArgs() {
+        const args = ["--mode", "rpc"];
+        if (this.config.model)
+            args.push("--model", this.config.model);
+        args.push("--approval-mode", this.config.omp?.approvalMode ?? this.config.approvalMode ?? "yolo");
+        if (this.config.resumeSessionId &&
+            (this.config.runnerType ?? "omp") === "omp") {
+            args.push("--resume", this.config.resumeSessionId);
+        }
+        args.push("--config", this.writeSessionOverlay());
+        for (const extra of this.config.configOverlays ?? []) {
+            args.push("--config", extra);
+        }
+        return args;
+    }
+    /** omp finds plugin skills via `skills.customDirectories`, so the roots go in a config overlay. */
+    /** Without this, a `subagent_type` dispatch fails and each pass silently drops to a bare default model. */
+    stageAgents() {
+        const roots = this.pluginPaths();
+        if (roots.length === 0)
+            return;
+        try {
+            const staged = stageOmpAgents(roots, {
+                ...process.env,
+                ...this.config.env,
+            });
+            if (staged.length > 0) {
+                this.config.logger?.debug?.(`Staged omp task agents: ${staged.join(", ")}`);
+            }
+        }
+        catch (error) {
+            // A missing agent definition degrades the review passes; it must not
+            // take the session down with it.
+            this.emitError(error instanceof Error ? error : new Error(String(error)));
+        }
+    }
+    pluginPaths() {
+        return (this.config.plugins ?? [])
+            .map((plugin) => (typeof plugin.path === "string" ? plugin.path : null))
+            .filter((path) => path !== null);
+    }
+    /**
+     * One overlay carrying the session's skill roots and MCP tool denials. Always
+     * written: without it omp reaches every MCP server the repo defines, which is
+     * a wider surface than the allowlist the Claude runner enforces.
+     */
+    writeSessionOverlay() {
+        const roots = this.pluginPaths().map((path) => join(path, "skills"));
+        const policy = resolveMcpPolicy(this.config.allowedTools, this.config.workingDirectory ?? cwd());
+        this.writeMcpDenylist(policy.disabledServers);
+        const lines = [];
+        if (roots.length > 0) {
+            lines.push("skills:", "  customDirectories:");
+            for (const root of roots)
+                lines.push(`    - ${JSON.stringify(root)}`);
+        }
+        if (policy.deniedTools.length > 0) {
+            lines.push("tools:", "  approval:");
+            for (const tool of policy.deniedTools) {
+                lines.push(`    ${JSON.stringify(tool)}: deny`);
+            }
+        }
+        const dir = join(this.config.cyrusHome, "omp-overlays");
+        mkdirSync(dir, { recursive: true });
+        const file = join(dir, `${(this.config.workspaceName ?? "session").replace(/[^\w.-]/g, "_")}.yml`);
+        writeFileSync(file, `${lines.join("\n")}\n`);
+        return file;
+    }
+    /**
+     * `disabledServers` is omp's highest-precedence denylist, read from the user
+     * MCP config in the *active native agent directory*. `PI_CODING_AGENT_DIR`
+     * relocates that directory, so the denylist must follow it: writing to
+     * `$HOME/.omp/agent` while a session runs against a relocated dir leaves the
+     * allowlist unenforced at the server level. Merges into any existing file so a
+     * plugin-provided `mcpServers` entry there survives.
+     */
+    writeMcpDenylist(disabledServers) {
+        const env = { ...process.env, ...this.config.env };
+        const dir = env.PI_CODING_AGENT_DIR ??
+            join(env.HOME ?? homedir(), env.PI_CONFIG_DIR ?? ".omp", "agent");
+        const file = join(dir, "mcp.json");
+        mkdirSync(dir, { recursive: true });
+        let existing = {};
+        try {
+            existing = JSON.parse(readFileSync(file, "utf8"));
+        }
+        catch {
+            // No prior file, or unparseable: the denylist still has to land.
+        }
+        writeFileSync(file, `${JSON.stringify({ ...existing, disabledServers }, null, "\t")}\n`);
+    }
+    handleFrame(frame) {
+        this.emit("frame", frame);
+        if (frame.type === "extension_ui_request") {
+            this.answerUIRequest(frame);
+            return;
+        }
+        // A prompt is acked before the agent starts and can fail later with the same
+        // id and no `agent_end`; without this the session hangs forever.
+        if (frame.type === "response" && frame.success === false) {
+            if (PROMPT_COMMANDS[frame.command]) {
+                this.failRun(frame.error ?? `omp rejected ${frame.command}`);
+            }
+            return;
+        }
+        // `isTerminal: false` means omp scheduled more work, so the run has not
+        // settled yet and Cyrus must not treat it as completion.
+        if (frame.type === "agent_end" && frame.isTerminal !== false) {
+            void this.finishRun(frame);
+            return;
+        }
+        for (const message of this.mapper.map(frame))
+            this.pushMessage(message);
+    }
+    /** Fetch cost/token totals before mapping the terminal agent_end; failure degrades to zeros. */
+    async finishRun(frame) {
+        try {
+            const response = await this.process?.command({ type: "get_session_stats" }, 10_000);
+            if (response?.success && response.data) {
+                // Every field on OmpSessionStats is optional, so a payload change
+                // degrades to zeroed accounting instead of a wrong number.
+                const stats = response.data;
+                this.mapper.applySessionStats(stats);
+            }
+        }
+        catch (error) {
+            this.emitError(error instanceof Error ? error : new Error(String(error)));
+        }
+        for (const message of this.mapper.map(frame))
+            this.pushMessage(message);
+        this.settleRun();
+    }
+    /** No UI here, and an unanswered dialog stalls its tool call, so blocking methods are cancelled. */
+    answerUIRequest(frame) {
+        if (!BLOCKING_UI_METHODS[frame.method])
+            return;
+        this.process?.notify({
+            cancelled: true,
+            id: frame.id,
+            type: "extension_ui_response",
+        });
+    }
+    /** Emit a terminal error result, then settle and finalize the run. */
+    failRun(reason) {
+        if (this.finalized)
+            return;
+        const text = `${OMP_ABORT_MARKER} ${reason}`;
+        // The assistant text block is what surfaces the abort. Cyrus builds its
+        // GitHub reply from the last assistant message and refuses to invent one,
+        // so a result carrying the reason only in `errors[]` posts nothing - and a
+        // review whose gate was already armed then stays pending forever.
+        this.pushMessage(this.mapper.abortNotice(text));
+        this.pushMessage(this.mapper.errorResult(text));
+        this.settleRun();
+        this.finalize();
+    }
+    settleRun() {
+        const settled = this.runSettled;
+        this.runSettled = null;
+        settled?.();
+    }
+    finalize() {
+        if (this.finalized)
+            return;
+        this.finalized = true;
+        if (this.sessionInfo) {
+            this.sessionInfo.isRunning = false;
+            this.sessionInfo.sessionId = this.mapper.getSessionId();
+        }
+        this.streaming = false;
+        this.emit("complete", [...this.messages]);
+    }
+    pushMessage(message) {
+        if (message.type === "result")
+            this.emittedResult = true;
+        this.messages.push(message);
+        this.emit("message", message);
+        void this.config.onMessage?.(message);
+    }
+    emitError(error) {
+        if (this.listenerCount("error") > 0)
+            this.emit("error", error);
+        void this.config.onError?.(error);
+    }
+}
+//# sourceMappingURL=OmpRunner.js.map
