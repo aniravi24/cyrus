@@ -439,20 +439,25 @@ Supported mrkdwn syntax:
 		await reactionService.addReaction({ ...target, name: PROCESSED_REACTION });
 	}
 
-	async notifyBusy(event: SlackWebhookEvent): Promise<void> {
+	async postNotice(event: SlackWebhookEvent, text: string): Promise<void> {
 		const token = this.getSlackBotToken(event);
 		if (!token) {
 			return;
 		}
 
-		const threadTs = event.payload.thread_ts || event.payload.ts;
-
 		await new SlackMessageService().postMessage({
 			token,
 			channel: event.payload.channel,
-			text: "I'm still working on the previous request in this thread. I'll pick up your new message once I'm done.",
-			thread_ts: threadTs,
+			text,
+			thread_ts: event.payload.thread_ts || event.payload.ts,
 		});
+	}
+
+	async notifyBusy(event: SlackWebhookEvent): Promise<void> {
+		await this.postNotice(
+			event,
+			"I'm still working on the previous request in this thread. I'll pick up your new message once I'm done.",
+		);
 	}
 
 	private isSelfMessage(msg: SlackThreadMessage, selfBotId?: string): boolean {

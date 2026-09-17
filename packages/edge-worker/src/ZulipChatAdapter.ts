@@ -342,13 +342,19 @@ Two Zulip-specific rules:
 		);
 	}
 
-	async notifyBusy(event: ZulipWebhookEvent): Promise<void> {
+	async postNotice(event: ZulipWebhookEvent, text: string): Promise<void> {
 		await this.messageService.postMessage({
 			credentials: event.credentials,
 			destination: this.destinationFor(event.message),
-			content:
-				"I'm still working on the previous request in this topic. I'll pick up your new message once I'm done.",
+			content: text,
 		});
+	}
+
+	async notifyBusy(event: ZulipWebhookEvent): Promise<void> {
+		await this.postNotice(
+			event,
+			"I'm still working on the previous request in this topic. I'll pick up your new message once I'm done.",
+		);
 	}
 
 	/** Where a reply to this message should go */

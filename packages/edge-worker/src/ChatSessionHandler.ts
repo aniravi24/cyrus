@@ -84,6 +84,15 @@ export interface ChatPlatformAdapter<TEvent> {
 
 	/** Notify the user that a previous request is still processing */
 	notifyBusy(event: TEvent, threadKey: string): Promise<void>;
+
+	/**
+	 * Post a plain text notice into the event's thread, with no session behind
+	 * it. Used to decline a request (busy, maintenance) rather than answer it.
+	 *
+	 * Optional: a platform that cannot post unprompted omits it and declines
+	 * silently.
+	 */
+	postNotice?(event: TEvent, text: string): Promise<void>;
 }
 
 /**
@@ -123,6 +132,11 @@ export interface ChatSessionHandlerDeps {
 	getOpenCodeGlobalStateScope?: () =>
 		| OpenCodeConfigOverrides["stateScope"]
 		| undefined;
+	/**
+	 * Live read of maintenance mode. When enabled the handler starts no
+	 * session and posts `message` instead.
+	 */
+	getMaintenanceMode?: () => { enabled: boolean; message: string };
 	onWebhookStart: () => void;
 	onWebhookEnd: () => void;
 	onStateChange: () => Promise<void>;
@@ -205,6 +219,27 @@ export class ChatSessionHandler<TEvent> {
 
 			const taskInstructions = this.adapter.extractTaskInstructions(event);
 			const threadKey = this.adapter.getThreadKey(event);
+
+			// Maintenance mode: answer in-thread, start nothing. Placed after the
+			// thread key is resolved so a plain message in an unbound thread stays
+			// ignored, exactly as it is when the worker is running.
+			const maintenance = this.deps.getMaintenanceMode?.();
+			if (maintenance?.enabled) {
+				if (
+					!this.threadSessions.has(threadKey) &&
+					this.adapter.isSessionInitiatingEvent?.(event) === false
+				) {
+					this.logger.info(
+						`Ignoring non-initiating ${this.adapter.platformName} event for unbound thread ${threadKey} (maintenance mode)`,
+					);
+					return;
+				}
+				this.logger.info(
+					`Maintenance mode is on; declining ${this.adapter.platformName} event for thread ${threadKey}`,
+				);
+				await this.adapter.postNotice?.(event, maintenance.message);
+				return;
+			}
 
 			// Check if there's already an active session for this thread
 			const existingSessionId = this.threadSessions.get(threadKey);

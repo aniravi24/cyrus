@@ -23,6 +23,7 @@ Read it off the release tag, which is `v<upstream-version>-fork.<n>`: `v0.2.71-f
 | Auto-resume on restart    | Interrupted sessions resume when the host restarts                                                   |
 | Crash recovery with retry | Retries crashed sessions with backoff (`crashRetryCount`)                                            |
 | omp runner                | `packages/omp-runner` plus the `"omp"` runner type: runs a session on omp over its RPC protocol       |
+| Maintenance mode          | `maintenanceMode` config block plus `CYRUS_MAINTENANCE_MODE`: accept events, start no session, answer the request |
 
 Upstream PR: [#829](https://github.com/ceedaragents/cyrus/pull/829) (session recovery). The webhook patches were cherry-picked upstream in [#923](https://github.com/ceedaragents/cyrus/pull/923).
 

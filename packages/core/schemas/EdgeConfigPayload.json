@@ -1050,6 +1050,19 @@
 			},
 			"required": ["httpProxyPort", "socksProxyPort"],
 			"additionalProperties": false
+		},
+		"maintenanceMode": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean"
+				},
+				"message": {
+					"type": "string"
+				}
+			},
+			"required": ["enabled"],
+			"additionalProperties": false
 		}
 	},
 	"required": ["repositories"],

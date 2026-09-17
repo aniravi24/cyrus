@@ -377,6 +377,20 @@ export const RepositoryConfigSchema = z.object({
 });
 
 /**
+ * Maintenance mode: keep receiving events, start no agent session.
+ *
+ * Separate from `isActive: false` on a repository, which drops events
+ * silently. Maintenance mode answers the request instead, so a human waiting
+ * on the agent learns why nothing happened.
+ */
+export const MaintenanceModeConfigSchema = z.object({
+	/** When true, no agent session starts on any surface. */
+	enabled: z.boolean(),
+	/** Reply posted in place of a session. Falls back to a built-in notice. */
+	message: z.string().optional(),
+});
+
+/**
  * Edge configuration - the serializable configuration stored in ~/.cyrus/config.json
  *
  * This schema defines all settings that can be persisted to disk.
@@ -608,6 +622,18 @@ export const EdgeConfigSchema = z.object({
 	 * all agent network traffic through it for inspection and filtering.
 	 */
 	sandbox: SandboxConfigSchema.optional(),
+
+	/**
+	 * Maintenance mode. When enabled, every surface (Linear, GitHub, GitLab,
+	 * Slack, Zulip) is answered with `message` and no runner starts, so no
+	 * provider credits are spent. Session resumes, crash retries and
+	 * restart recovery are held back too.
+	 *
+	 * Hot-reloads with the config file, so it toggles without restarting the
+	 * worker. `CYRUS_MAINTENANCE_MODE` force-enables it regardless of this
+	 * block, mirroring `CYRUS_SLACK_THREAD_FOLLOWING_DISABLED`.
+	 */
+	maintenanceMode: MaintenanceModeConfigSchema.optional(),
 });
 
 /**

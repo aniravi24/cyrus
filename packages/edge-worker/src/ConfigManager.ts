@@ -66,6 +66,7 @@ const RELOAD_MERGED_KEYS = [
 	"prReviewTrigger",
 	"userAccessControl",
 	"sandbox",
+	"maintenanceMode",
 ] as const satisfies readonly (keyof EdgeConfig)[];
 
 /**
@@ -387,6 +388,11 @@ export class ConfigManager extends EventEmitter {
 					parsedConfig.global_setup_script ?? this.config.global_setup_script,
 				// Sandbox / egress proxy config
 				sandbox: parsedConfig.sandbox ?? this.config.sandbox,
+				// Read straight from the file, with no fall back to the in-memory
+				// value: absence means off. Every other key here preserves the
+				// current value when the file omits it, which for a switch would
+				// make it one-way - deleting the key could never turn it off.
+				maintenanceMode: parsedConfig.maintenanceMode,
 			};
 
 			// Basic validation

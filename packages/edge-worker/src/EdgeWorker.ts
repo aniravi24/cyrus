@@ -206,6 +206,19 @@ import { ZulipChatAdapter } from "./ZulipChatAdapter.js";
 export const GITHUB_NO_REPLY_MARKER = "<!-- cyrus:no-reply -->";
 
 /**
+ * Stamped on the GitHub notice maintenance mode posts, so automation around
+ * the repo can tell "the agent declined because it is off" apart from a real
+ * session reply without matching on prose it does not own.
+ */
+export const GITHUB_MAINTENANCE_MARKER = "<!-- cyrus:maintenance -->";
+
+/**
+ * Posted when maintenance mode is on and no `message` is configured.
+ */
+export const DEFAULT_MAINTENANCE_MESSAGE =
+	"Cyrus is temporarily off for maintenance, so nothing was started for this request. Mention me again once it is back on.";
+
+/**
  * Pull runner selectors out of a GitHub comment, honouring them only where an
  * automation would put them: leading whitespace, the bot mention, then the tags.
  *
@@ -1165,6 +1178,35 @@ export class EdgeWorker extends EventEmitter {
 	}
 
 	/**
+	 * Maintenance mode: keep accepting events, start no session, answer the
+	 * request so whoever is waiting is not left guessing.
+	 *
+	 * Read live on every event rather than captured at construction, because
+	 * the point of the switch is to flip it on a running worker - the config
+	 * file is watched, and `~/.cyrus/.env` is reloaded with `override: true`,
+	 * so both inputs change under a live process.
+	 *
+	 * The env var wins over the config block, the same precedence
+	 * `CYRUS_SLACK_THREAD_FOLLOWING_DISABLED` already has: an operator with a
+	 * shell must be able to force the worker quiet without editing JSON.
+	 */
+	getMaintenanceMode(): { enabled: boolean; message: string } {
+		const envValue = (process.env.CYRUS_MAINTENANCE_MODE ?? "")
+			.toLowerCase()
+			.trim();
+		const forcedOn =
+			envValue === "true" || envValue === "1" || envValue === "yes";
+		const configured = this.config.maintenanceMode;
+		return {
+			enabled: forcedOn || configured?.enabled === true,
+			message:
+				process.env.CYRUS_MAINTENANCE_MESSAGE?.trim() ||
+				configured?.message?.trim() ||
+				DEFAULT_MAINTENANCE_MESSAGE,
+		};
+	}
+
+	/**
 	 * Build the EdgeWorker-side dependencies every chat platform handler needs.
 	 *
 	 * Only the MCP config override list differs per platform, so it is the one
@@ -1204,6 +1246,7 @@ export class EdgeWorker extends EventEmitter {
 			},
 			getOpenCodeGlobalConfig: () => this.config.opencode?.config,
 			getOpenCodeGlobalStateScope: () => this.config.opencode?.stateScope,
+			getMaintenanceMode: () => this.getMaintenanceMode(),
 			onWebhookStart: () => {
 				this.activeWebhookCount++;
 			},
@@ -1499,6 +1542,36 @@ export class EdgeWorker extends EventEmitter {
 				this.logger.debug(
 					`Ignoring comment without @${botUsername} mention on ${repoFullName}#${prNumber}`,
 				);
+				return;
+			}
+
+			// Maintenance mode. After the mention filter, so an unrelated PR
+			// comment stays silent, and before the 👀 reaction, because a
+			// reaction with no session behind it reads as work in progress.
+			const maintenance = this.getMaintenanceMode();
+			if (maintenance.enabled) {
+				this.logger.info(
+					`Maintenance mode is on; declining GitHub webhook for ${repoFullName}#${prNumber}`,
+				);
+				const token = await this.resolveGitHubToken(
+					event,
+					this.findRepositoryByGitHubUrl(repoFullName) ?? undefined,
+				);
+				if (token && prNumber) {
+					await this.gitHubCommentService
+						.postIssueComment({
+							token,
+							owner: extractRepoOwner(event),
+							repo: extractRepoName(event),
+							issueNumber: prNumber,
+							body: `${maintenance.message}\n\n${GITHUB_MAINTENANCE_MARKER}`,
+						})
+						.catch((err: unknown) => {
+							this.logger.warn(
+								`Failed to post maintenance notice: ${err instanceof Error ? err.message : err}`,
+							);
+						});
+				}
 				return;
 			}
 
@@ -4690,6 +4763,17 @@ ${taskSection}`;
 			return;
 		}
 
+		// Maintenance mode. Placed after access control so a blocked user still
+		// gets the access message, and before any workspace or runner work.
+		const maintenance = this.getMaintenanceMode();
+		if (maintenance.enabled) {
+			this.logger.info(
+				`Maintenance mode is on; declining Linear session ${webhook.agentSession.id}`,
+			);
+			await this.postMaintenanceNotice(webhook, maintenance.message);
+			return;
+		}
+
 		// Use organizationId from webhook as the Linear-native workspace ID source
 		const linearWorkspaceId = webhook.organizationId;
 
@@ -5451,6 +5535,20 @@ ${taskSection}`;
 			return;
 		}
 
+		// Maintenance mode, after the stop branch so a session can always be
+		// stopped while the worker is off, and before the branches that start or
+		// resume a runner. A turn that was mid-flight when the switch flipped is
+		// declined too, including an AskUserQuestion answer: the operator asked
+		// for no further spend, and `createRunnerForType` would refuse anyway.
+		const maintenance = this.getMaintenanceMode();
+		if (maintenance.enabled) {
+			this.logger.info(
+				`Maintenance mode is on; declining prompt on Linear session ${agentSessionId}`,
+			);
+			await this.postMaintenanceNotice(webhook, maintenance.message);
+			return;
+		}
+
 		// Branch 1.5: Handle re-prompt for parked (blocked-by) sessions
 		// When a user re-prompts and the session is parked, re-check blocking status.
 		// If blockers are resolved, wake the session immediately.
@@ -5885,11 +5983,22 @@ ${taskSection}`;
 	 * global concurrency slot for the session's lifetime — this is the single
 	 * choke point that makes `maxConcurrentSessions` cover Linear, GitHub,
 	 * GitLab, and chat sessions alike.
+	 *
+	 * Being that choke point makes it the backstop for maintenance mode as
+	 * well. The per-surface gates decline politely; this one refuses, and it
+	 * is what guarantees no provider credit is spent: a resume, a crash retry,
+	 * or a stale-session retry re-enters through `resumeAgentSession` and
+	 * never passes a surface gate at all.
 	 */
 	private createRunnerForType(
 		runnerType: RunnerType,
 		config: AgentRunnerConfig,
 	): IAgentRunner {
+		if (this.getMaintenanceMode().enabled) {
+			throw new Error(
+				"Cyrus is in maintenance mode; refusing to start an agent runner",
+			);
+		}
 		return capRunnerStarts(
 			this.buildRunnerForType(runnerType, config),
 			this.runnerSlots,
@@ -7335,6 +7444,35 @@ ${input.userComment}
 	}
 
 	/**
+	 * Tell a Linear session the worker is off, and end it.
+	 *
+	 * A `response` activity rather than a `thought`: it closes the session, so
+	 * the issue does not sit in "Working" forever waiting on a run that will
+	 * never start. Same mechanism `handleBlockedUser` uses to decline.
+	 */
+	private async postMaintenanceNotice(
+		webhook: AgentSessionCreatedWebhook | AgentSessionPromptedWebhook,
+		message: string,
+	): Promise<void> {
+		const issueTracker = this.issueTrackers.get(webhook.organizationId);
+		if (!issueTracker) {
+			this.logger.warn(
+				`No issue tracker for workspace ${webhook.organizationId}; maintenance notice not posted`,
+			);
+			return;
+		}
+
+		await this.postActivityDirect(
+			issueTracker,
+			{
+				agentSessionId: webhook.agentSession.id,
+				content: { type: "response", body: message },
+			},
+			"maintenance notice",
+		);
+	}
+
+	/**
 	 * Load persisted EdgeWorker state for all repositories
 	 */
 	private async loadPersistedState(): Promise<void> {
@@ -7534,6 +7672,13 @@ ${input.userComment}
 	private async resumeInterruptedSessions(): Promise<void> {
 		console.log(`[EdgeWorker] Checking for interrupted sessions to resume...`);
 		let resumedCount = 0;
+
+		if (this.getMaintenanceMode().enabled) {
+			console.log(
+				`[EdgeWorker] Maintenance mode is on; not resuming interrupted sessions`,
+			);
+			return;
+		}
 
 		const interruptedSessions =
 			this.agentSessionManager.getInterruptedSessions();
