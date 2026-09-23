@@ -133,6 +133,7 @@ describe("WorkerService", () => {
 			promptDefaults: { debugger: { allowedTools: ["Read"] } },
 			sandbox: { enabled: false },
 			maxConcurrentSessions: 3,
+			maintenanceMode: { enabled: false },
 		});
 
 		// Fixture-completeness tripwire: adding a field to EdgeConfigSchema
