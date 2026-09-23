@@ -55,6 +55,8 @@ function githubHarness(config: unknown) {
 		activeWebhookCount: 0,
 		activeGitHubPrSessions: new Set<string>(),
 		queuedGitHubPrEvents: new Map<string, unknown[]>(),
+		activeGitHubPrEvents: new Map<string, unknown>(),
+		supersededGitHubDeliveries: new Set<string>(),
 		agentSessionManager: {},
 		logger: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() },
 		gitHubCommentService: { postIssueComment, addReaction },

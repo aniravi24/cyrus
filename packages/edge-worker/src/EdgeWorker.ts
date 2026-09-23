@@ -213,6 +213,19 @@ export const GITHUB_NO_REPLY_MARKER = "<!-- cyrus:no-reply -->";
 export const GITHUB_MAINTENANCE_MARKER = "<!-- cyrus:maintenance -->";
 
 /**
+ * A review request names the PR head it was posted for, as
+ * `<!-- bot-review-kickoff sha=<sha> -->` or the rescue variant. A newer
+ * request for another head makes a running review of the old one worthless:
+ * its findings would cite a commit the PR has left.
+ */
+const GITHUB_REVIEW_REQUEST_PATTERN =
+	/<!-- bot-review-(?:kickoff|rescue) sha=([0-9a-f]{7,40}) -->/;
+
+export function extractReviewRequestSha(body: string): string | null {
+	return GITHUB_REVIEW_REQUEST_PATTERN.exec(body)?.[1] ?? null;
+}
+
+/**
  * Posted when maintenance mode is on and no `message` is configured.
  */
 export const DEFAULT_MAINTENANCE_MESSAGE =
@@ -300,6 +313,10 @@ export class EdgeWorker extends EventEmitter {
 	// GitHub webhook handlers share a PR worktree, so only one may run per PR.
 	private activeGitHubPrSessions = new Set<string>();
 	private queuedGitHubPrEvents = new Map<string, GitHubCommentWebhookEvent[]>();
+	/** The event each PR's running GitHub session was started for. */
+	private activeGitHubPrEvents = new Map<string, GitHubCommentWebhookEvent>();
+	/** Deliveries whose session was stopped for a newer review; they post no reply. */
+	private supersededGitHubDeliveries = new Set<string>();
 	/** Handler for AskUserQuestion tool invocations via Linear select signal */
 	private askUserQuestionHandler: AskUserQuestionHandler;
 	/** User access control for whitelisting/blacklisting Linear users */
@@ -1660,14 +1677,17 @@ export class EdgeWorker extends EventEmitter {
 
 			if (!reservedGitHubPrSlot) {
 				if (this.activeGitHubPrSessions.has(sessionKey)) {
-					const queue = this.queuedGitHubPrEvents.get(sessionKey) ?? [];
-					queue.push(event);
-					this.queuedGitHubPrEvents.set(sessionKey, queue);
+					const stoppedStaleReview = this.enqueueGitHubPrEvent(
+						sessionKey,
+						event,
+					);
+					const waiting =
+						this.queuedGitHubPrEvents.get(sessionKey)?.length ?? 0;
 					this.logger.info(
-						`Queued GitHub webhook for ${repoFullName}#${prNumber}; ${queue.length} event(s) waiting`,
+						`Queued GitHub webhook for ${repoFullName}#${prNumber}; ${waiting} event(s) waiting`,
 					);
 
-					if (reactionToken && prNumber) {
+					if (!stoppedStaleReview && reactionToken && prNumber) {
 						this.gitHubCommentService
 							.postIssueComment({
 								token: reactionToken,
@@ -1688,6 +1708,7 @@ export class EdgeWorker extends EventEmitter {
 				this.activeGitHubPrSessions.add(sessionKey);
 				hasReservedGitHubPrSlot = true;
 			}
+			this.activeGitHubPrEvents.set(sessionKey, event);
 
 			// For pull_request_review events, post an instant acknowledgement comment
 			if (isPullRequestReview && reactionToken && prNumber) {
@@ -1939,6 +1960,9 @@ export class EdgeWorker extends EventEmitter {
 			) {
 				this.advanceGitHubPrQueue(githubPrQueueKey);
 			}
+			if (hasReservedGitHubPrSlot) {
+				this.supersededGitHubDeliveries.delete(event.deliveryId);
+			}
 			this.activeWebhookCount--;
 		}
 	}
@@ -1951,6 +1975,7 @@ export class EdgeWorker extends EventEmitter {
 		}
 
 		if (nextEvent) {
+			this.activeGitHubPrEvents.set(sessionKey, nextEvent);
 			// Keep the slot reserved while the next event starts to prevent a newly
 			// arrived webhook from overtaking the FIFO queue.
 			this.handleGitHubWebhook(nextEvent, true).catch((error) => {
@@ -1961,7 +1986,55 @@ export class EdgeWorker extends EventEmitter {
 			});
 		} else {
 			this.activeGitHubPrSessions.delete(sessionKey);
+			this.activeGitHubPrEvents.delete(sessionKey);
 		}
+	}
+
+	/**
+	 * Queue an event behind the PR's running session. A review request replaces
+	 * any older review request still waiting, and when the running session is a
+	 * review of a different head it is stopped, so the new review starts as soon
+	 * as the slot frees instead of after a review nobody will act on. Returns
+	 * true when a running review was stopped.
+	 */
+	private enqueueGitHubPrEvent(
+		sessionKey: string,
+		event: GitHubCommentWebhookEvent,
+	): boolean {
+		const queue = this.queuedGitHubPrEvents.get(sessionKey) ?? [];
+		const requestedSha = extractReviewRequestSha(extractCommentBody(event));
+		if (!requestedSha) {
+			queue.push(event);
+			this.queuedGitHubPrEvents.set(sessionKey, queue);
+			return false;
+		}
+
+		const kept = queue.filter(
+			(queued) => !extractReviewRequestSha(extractCommentBody(queued)),
+		);
+		kept.push(event);
+		this.queuedGitHubPrEvents.set(sessionKey, kept);
+
+		const active = this.activeGitHubPrEvents.get(sessionKey);
+		const activeSha = active
+			? extractReviewRequestSha(extractCommentBody(active))
+			: null;
+		if (!active || !activeSha || activeSha === requestedSha) return false;
+
+		const live = this.agentSessionManager
+			.getSessionsByIssueId(sessionKey)
+			.filter((session) => session.agentRunner?.isRunning());
+		if (live.length === 0) return false;
+
+		this.logger.info(
+			`Review of ${activeSha} on ${sessionKey} superseded by ${requestedSha}; stopping ${live.length} session(s)`,
+		);
+		this.supersededGitHubDeliveries.add(active.deliveryId);
+		for (const session of live) {
+			this.agentSessionManager.requestSessionStop(session.id);
+			session.agentRunner?.stop();
+		}
+		return true;
 	}
 
 	/**
@@ -1977,6 +2050,7 @@ export class EdgeWorker extends EventEmitter {
 		const sessionKey = `github:${payload.repository.full_name}#${payload.pull_request.number}`;
 		this.queuedGitHubPrEvents.delete(sessionKey);
 		this.activeGitHubPrSessions.delete(sessionKey);
+		this.activeGitHubPrEvents.delete(sessionKey);
 
 		const sessions = this.agentSessionManager.getSessionsByIssueId(sessionKey);
 		const live = sessions.filter((session) => session.agentRunner?.isRunning());
@@ -2316,6 +2390,14 @@ ${taskSection}`;
 		repository: RepositoryConfig,
 	): Promise<void> {
 		try {
+			// A superseded review was stopped mid-run; its last text is a progress
+			// note, not a result, and the review that replaced it will report.
+			if (this.supersededGitHubDeliveries.has(event.deliveryId)) {
+				this.logger.info(
+					"Skipping GitHub reply: session was superseded by a newer review",
+				);
+				return;
+			}
 			// Get the last assistant message from the runner as the summary
 			const messages = runner.getMessages();
 			const lastAssistantMessage = [...messages]
